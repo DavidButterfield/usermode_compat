@@ -30,19 +30,21 @@ the necessary libraries.
 
 **UMC Client**
   
-    <A HREF="https://davidbutterfield.github.io/SCST-Usermode-Adaptation/">
+<A HREF="https://davidbutterfield.github.io/SCST-Usermode-Adaptation/">
          <STRONG>iSCSI-SCST Storage Server Usermode Adaptation</STRONG></A>
     &mdash; a port of the SCST iSCSI storage server to run entirely in usermode on an unmodified Linux kernel. &nbsp;
-    <A  HREF="https://davidbutterfield.github.io/SCST-Usermode-Adaptation/SCST_Usermode.html">
+<A  HREF="https://davidbutterfield.github.io/SCST-Usermode-Adaptation/SCST_Usermode.html">
 	 <I>[Paper describing the project in detail]</I></A>
 
 **Diagrams showing the relationship between UMC, MTE, and SCST**  
 
-    <A  HREF="https://davidbutterfield.github.io/SCST-Usermode-Adaptation/SCST_usermode_service_map.pdf">
-    <IMG SRC="https://davidbutterfield.github.io/SCST-Usermode-Adaptation/SCST_usermode_service_map.png" BORDER=1 style="padding:5px; border-color: grey" WIDTH=720></A>
+<A  HREF="https://davidbutterfield.github.io/SCST-Usermode-Adaptation/SCST_usermode_service_map.pdf">
+<IMG SRC="https://davidbutterfield.github.io/SCST-Usermode-Adaptation/SCST_usermode_service_map.png"
+ BORDER=1 style="padding:5px; border-color: grey" WIDTH=720></A>
 
 <P>
-    <A  HREF="https://davidbutterfield.github.io/SCST-Usermode-Adaptation/SCST_usermode_includes.pdf">
-    <IMG SRC="https://davidbutterfield.github.io/SCST-Usermode-Adaptation/SCST_usermode_includes.png" BORDER=1 style="padding:5px; border-color: grey" WIDTH=720></A>
+<A  HREF="https://davidbutterfield.github.io/SCST-Usermode-Adaptation/SCST_usermode_includes.pdf">
+<IMG SRC="https://davidbutterfield.github.io/SCST-Usermode-Adaptation/SCST_usermode_includes.png"
+ BORDER=1 style="padding:5px; border-color: grey" WIDTH=720></A>
 
 </SMALL>
