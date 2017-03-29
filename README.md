@@ -22,7 +22,7 @@ Linux-specific system call options, these could easily be abstracted out to
 allow the possibility of running SCST also on _non_-Linux systems having gcc and
 the necessary libraries.
 
-**UMC Depends on** the
+**UMC depends on**
 <A HREF="https://github.com/DavidButterfield/MTE">Multithreaded Engine (libmte)</A>
     &mdash; a high-performance multi-threaded event dispatching engine for usermode.
 
