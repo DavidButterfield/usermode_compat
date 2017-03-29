@@ -2,6 +2,7 @@
 **Usermode Compatibility for Linux Kernel Code (UMC)**  
 A shim for running some Linux kernel code in usermode  
 *David A. Butterfield*
+
 <SMALL>
 
 The initial implementation of UMC emulates a sufficient subset of Linux kernel
@@ -36,12 +37,9 @@ the necessary libraries.
 
 **Diagrams showing the relationship between UMC, MTE, and SCST**  
 
-<A  HREF="https://davidbutterfield.github.io/SCST-Usermode-Adaptation/SCST_usermode_service_map.pdf">
-<IMG SRC="https://davidbutterfield.github.io/SCST-Usermode-Adaptation/SCST_usermode_service_map.png" BORDER=1 style="padding:5px; border-color: grey" WIDTH=720></A>
+<A  HREF="https://davidbutterfield.github.io/SCST-Usermode-Adaptation/SCST_usermode_service_map.pdf"><IMG SRC="https://davidbutterfield.github.io/SCST-Usermode-Adaptation/SCST_usermode_service_map.png" BORDER=1 style="padding:5px; border-color: grey" WIDTH=720></A>
 
 <P>
-<A  HREF="https://davidbutterfield.github.io/SCST-Usermode-Adaptation/SCST_usermode_includes.pdf">
-<IMG SRC="https://davidbutterfield.github.io/SCST-Usermode-Adaptation/SCST_usermode_includes.png" BORDER=1 style="padding:5px; border-color: grey" WIDTH=720></A>
+<A  HREF="https://davidbutterfield.github.io/SCST-Usermode-Adaptation/SCST_usermode_includes.pdf"><IMG SRC="https://davidbutterfield.github.io/SCST-Usermode-Adaptation/SCST_usermode_includes.png" BORDER=1 style="padding:5px; border-color: grey" WIDTH=720></A>
 
 </SMALL>
-</BODY>
