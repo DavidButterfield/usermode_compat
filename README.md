@@ -28,7 +28,7 @@ the necessary libraries.
 <A HREF="https://github.com/DavidButterfield/MTE">Multithreaded Engine (libmte)</A>
     &mdash; a high-performance multi-threaded event dispatching engine for usermode.
 
-**UMC Client**    
+**UMC Client** 
 <A HREF="https://davidbutterfield.github.io/SCST-Usermode-Adaptation/">
          <STRONG>iSCSI-SCST Storage Server Usermode Adaptation</STRONG></A>
     &mdash; a port of the SCST iSCSI storage server to run entirely in usermode on an unmodified Linux kernel. &nbsp;
@@ -37,13 +37,13 @@ the necessary libraries.
 
 **Diagrams showing the relationship between UMC, MTE, and SCST**  
 
-<A  HREF="https://davidbutterfield.github.io/SCST-Usermode-Adaptation/SCST_usermode_service_map.pdf">
-<IMG SRC="https://davidbutterfield.github.io/SCST-Usermode-Adaptation/SCST_usermode_service_map.png"
- BORDER=1 style="padding:5px; border-color: grey" WIDTH=720></A>
+<A HREF="https://davidbutterfield.github.io/SCST-Usermode-Adaptation/SCST_usermode_service_map.pdf">
+\<IMG SRC="https://davidbutterfield.github.io/SCST-Usermode-Adaptation/SCST_usermode_service_map.png"
+ BORDER=1 style="padding:5px; border-color: grey" WIDTH=720\></A>
 
 <P>
-<A  HREF="https://davidbutterfield.github.io/SCST-Usermode-Adaptation/SCST_usermode_includes.pdf">
-<IMG SRC="https://davidbutterfield.github.io/SCST-Usermode-Adaptation/SCST_usermode_includes.png"
- BORDER=1 style="padding:5px; border-color: grey" WIDTH=720></A>
+<A HREF="https://davidbutterfield.github.io/SCST-Usermode-Adaptation/SCST_usermode_includes.pdf">
+\<IMG SRC="https://davidbutterfield.github.io/SCST-Usermode-Adaptation/SCST_usermode_includes.png"
+ BORDER=1 style="padding:5px; border-color: grey" WIDTH=720\></A>
 
 </SMALL>
