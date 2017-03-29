@@ -3,8 +3,6 @@
 A shim for running some Linux kernel code in usermode  
 *David A. Butterfield*
 
-<SMALL>
-
 The initial implementation of UMC emulates a sufficient subset of Linux kernel
 internal functions to support an SCST-based iSCSI storage server (based on
 ~80,000 lines of SCST kernel sources) running entirely in usermode on an
@@ -38,16 +36,9 @@ the necessary libraries.
 
 **Diagrams showing the relationship between UMC, MTE, and SCST**  
 
-![SCST usermode service map](https://davidbutterfield.github.io/SCST-Usermode-Adaptation/SCST_usermode_service_map.png "SCST Usermode Service Map")
+![SCST usermode service map](https://davidbutterfield.github.io/SCST-Usermode-Adaptation/SCST_usermode_service_map.png
+                             "SCST Usermode Service Map")
 
-<P>
-<A HREF="https://davidbutterfield.github.io/SCST-Usermode-Adaptation/SCST_usermode_service_map.pdf">
-    <IMG SRC="https://davidbutterfield.github.io/SCST-Usermode-Adaptation/SCST_usermode_service_map.png"
-    BORDER=1 style="padding:5px; border-color: grey" WIDTH=720></A>
+![SCST usermode header and library inclusions](https://davidbutterfield.github.io/SCST-Usermode-Adaptation/SCST_usermode_includes.png
+                                               "SCST Usermode Header and Library Inclusions")
 
-<P>
-<A HREF="https://davidbutterfield.github.io/SCST-Usermode-Adaptation/SCST_usermode_includes.pdf">
-    <IMG SRC="https://davidbutterfield.github.io/SCST-Usermode-Adaptation/SCST_usermode_includes.png"
-    BORDER=1 style="padding:5px; border-color: grey" WIDTH=720></A>
-
-</SMALL>
