@@ -26,7 +26,7 @@ the necessary libraries.
 <A HREF="https://github.com/DavidButterfield/MTE">Multithreaded Engine (libmte)</A>
     &mdash; a high-performance multi-threaded event dispatching engine for usermode.
 
-#### <U>UMC Client</U>
+#### UMC Client
 <A HREF="https://github.com/DavidButterfield/SCST-Usermode-Adaptation">
          iSCSI-SCST Storage Server Usermode Adaptation</A>
     &mdash; a port of the SCST iSCSI storage server to run entirely in usermode on an unmodified Linux kernel.
