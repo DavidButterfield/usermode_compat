@@ -41,4 +41,4 @@ the necessary libraries.
 * * *
 ![SCST usermode header and library inclusions](https://davidbutterfield.github.io/SCST-Usermode-Adaptation/SCST_usermode_includes.png
                                                "SCST Usermode Header and Library Inclusions")
-
+* * *
