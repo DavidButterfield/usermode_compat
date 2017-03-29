@@ -35,7 +35,7 @@ the necessary libraries.
          <I>[Paper describing the project in detail]</I></A>
 
 #### Diagrams showing the relationship between UMC, MTE, and SCST
-
+* * *
 ![SCST usermode service map](https://davidbutterfield.github.io/SCST-Usermode-Adaptation/SCST_usermode_service_map.png
                              "SCST Usermode Service Map")
 * * *
