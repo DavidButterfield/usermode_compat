@@ -26,7 +26,7 @@ the necessary libraries.
 <A HREF="https://github.com/DavidButterfield/MTE">Multithreaded Engine (libmte)</A>
     &mdash; a high-performance multi-threaded event dispatching engine for usermode.
 
-###### UMC Client
+#### UMC Client
 <A HREF="https://github.com/DavidButterfield/SCST-Usermode-Adaptation">
          iSCSI-SCST Storage Server Usermode Adaptation</A>
     &mdash; a port of the SCST iSCSI storage server to run entirely in usermode on an unmodified Linux kernel.
@@ -34,11 +34,11 @@ the necessary libraries.
 <A HREF="https://davidbutterfield.github.io/SCST-Usermode-Adaptation/SCST_Usermode.html">
          <I>[Paper describing the project in detail]</I></A>
 
-###### Diagrams showing the relationship between UMC, MTE, and SCST
+#### Diagrams showing the relationship between UMC, MTE, and SCST
 
 ![SCST usermode service map](https://davidbutterfield.github.io/SCST-Usermode-Adaptation/SCST_usermode_service_map.png
                              "SCST Usermode Service Map")
-
+---
 ![SCST usermode header and library inclusions](https://davidbutterfield.github.io/SCST-Usermode-Adaptation/SCST_usermode_includes.png
                                                "SCST Usermode Header and Library Inclusions")
 
