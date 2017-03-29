@@ -18,9 +18,9 @@ by another ~300 LOC in usermode_lib.c.  Another ~700 LOC implements a
 translation between the kernel's proc_dir_entry calls and fuse(8) calls, to
 support the kernel module's interface to system applications.
 
-Though there are presently a small number of places in the code using
+Although there are presently a small number of places in the code using
 Linux-specific system call options, these could easily be abstracted out to
-allow the possibility of running SCST also on non-Linux systems having gcc and
+allow the possibility of running SCST also on _non_-Linux systems having gcc and
 the necessary libraries.
 
 **UMC Depends on**
@@ -28,16 +28,12 @@ the necessary libraries.
          <STRONG>Multithreaded Event Engine (libmte)</STRONG></A>
     &mdash; a high-performance multi-threaded event dispatching engine for usermode.
 
-<P>
-
 **UMC Client**  
 <A HREF="https://davidbutterfield.github.io/SCST-Usermode-Adaptation/">
          <STRONG>iSCSI-SCST Storage Server Usermode Adaptation</STRONG></A>
     &mdash; a port of the SCST iSCSI storage server to run entirely in usermode on an unmodified Linux kernel. &nbsp;
 <A  HREF="https://davidbutterfield.github.io/SCST-Usermode-Adaptation/SCST_Usermode.html">
 	 <I>[Paper describing the project in detail]</I></A>
-
-<P>
 
 **Diagrams showing the relationship between UMC, MTE, and SCST**  
 
