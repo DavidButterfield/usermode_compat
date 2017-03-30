@@ -24,7 +24,7 @@ the necessary libraries.
 
 **UMC depends on**
 <A HREF="https://github.com/DavidButterfield/MTE">Multithreaded Engine (libmte)</A>
-    &mdash; a high-performance multi-threaded event dispatching engine for usermode.
+    &mdash; a high-performance multi-threaded usermode event dispatching engine.
 
 #### UMC Client
 <A HREF="https://github.com/DavidButterfield/SCST-Usermode-Adaptation">
