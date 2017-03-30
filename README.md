@@ -31,7 +31,7 @@ the necessary libraries.
          iSCSI-SCST Storage Server Usermode Adaptation</A>
     &mdash; a port of the SCST iSCSI storage server to run entirely in usermode on an unmodified Linux kernel.
     &nbsp;
-<A HREF="https://davidbutterfield.github.io/SCST-Usermode-Adaptation/SCST_Usermode.html">
+<A HREF="https://davidbutterfield.github.io/SCST-Usermode-Adaptation/docs/SCST_Usermode.html">
          <I>[Paper describing the project in detail]</I></A>
 
 #### Diagrams showing the relationship between UMC, MTE, and SCST
