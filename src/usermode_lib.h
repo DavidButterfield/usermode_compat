@@ -57,7 +57,7 @@ extern int sysinfo (struct sysinfo *__info);
 
 #include "UMC_kernel.h"	    /* a few random definitions from kernel headers */
 
-/* Include a few real kernel files (more at end of this file) */
+/* Include a few real kernel files */
 #include "UMC/linux/byteorder/generic.h"
 #include "UMC/linux/unaligned/access_ok.h"
 #include "UMC/linux/unaligned/generic.h"
@@ -736,7 +736,7 @@ rwlock_drop(rwlock_t * const rw, uint32_t ndrop)
 #define write_lock_bh(rw)		write_lock(rw)
 #define write_unlock_bh(rw)		write_unlock(rw)
 
-/* Multi-Reader/Single-Writer SPIN lock -- favors readers, recursive read OK */
+/* Mutex SPIN lock */
 /* Implement using a pthread_mutex and _trylock(), so it can work with pthread_cond_t */
 typedef struct spinlock {
     pthread_mutex_t	    plock;
@@ -1221,7 +1221,7 @@ struct task_struct {
     /* kernel code compatibility */
     cpumask_t		    cpus_allowed;
     bool	   volatile should_stop;    /* kthread shutdown signalling */
-    sstring_t		    comm;	    /* thread name (string not owned) */
+    sstring_t		    comm;	    /* thread name (string owned) */
     pid_t	            pid;	    /* tid, actually */
     int			    flags;	    /* ignored */
     void		  * io_context;	    /* unused */
@@ -1378,12 +1378,12 @@ kthread_stop(struct task_struct * task)
     verify(task != current);
 
     /* Wait for the thread to exit */
-    if (!wait_for_completion_timeout(&task->stopped, 2 * HZ)) {
+    if (!wait_for_completion_timeout(&task->stopped, 3 * HZ)) {
 	/* Too slow -- jab it for a stacktrace */
 	sys_warning("kthread_stop of %s (%u) excessive wait -- attempting stacktrace",
 		    task->comm, task->pid);
 	tkill(task->pid, SIGSTKFLT);
-	if (!wait_for_completion_timeout(&task->stopped, HZ)) {
+	if (!wait_for_completion_timeout(&task->stopped, 10 * HZ)) {
 	    sys_warning("kthread_stop of %s (%u) excessive wait -- giving up",
 			task->comm, task->pid);
 	    return -EPERM;
@@ -2274,11 +2274,6 @@ extern errno_t pde_fuse_exit(void);
 #define MODULE_NAME_LEN			56
 struct modversion_info { unsigned long crc; char name[MODULE_NAME_LEN]; };
 struct module { char name[MODULE_NAME_LEN]; int arch; };
-
-//static __unused struct module { char name[MODULE_NAME_LEN]; int arch; } __this_module;
-
- //57 #define assert_static(e) ;enum { CONCAT(static_assert_, __COUNTER__) = 1/(!!(e)) }
-
 
 #define MODULE_INFO(ver, str)		/* */
 #define MODULE_PARM_DESC(var, desc)	/* */
