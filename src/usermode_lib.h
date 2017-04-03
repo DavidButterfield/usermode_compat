@@ -57,19 +57,47 @@ extern int sysinfo (struct sysinfo *__info);
 
 #include "UMC_kernel.h"	    /* a few random definitions from kernel headers */
 
+#ifdef __x86_64__
+
+ #define cpu_to_le64(x)			(x)
+ #define le64_to_cpu(x)			(x)
+ #define cpu_to_le32(x)			(x)
+ #define le32_to_cpu(x)			(x)
+ #define cpu_to_le16(x)			(x)
+ #define le16_to_cpu(x)			(x)
+
+ #define get_unaligned(p)		(*(p))
+ #define get_unaligned_le16(p)		(*(uint16_t *)(p))
+ #define get_unaligned_le32(p)		(*(uint32_t *)(p))
+ #define get_unaligned_le64(p)		(*(uint64_t *)(p))
+
+ #define put_unaligned(v, p)		(*(p) = (v)) 
+ #define put_unaligned_le16(v, p)	(*(uint16_t *)(p) = (uint16_t)(v)) 
+ #define put_unaligned_le32(v, p)	(*(uint32_t *)(p) = (uint32_t)(v)) 
+ #define put_unaligned_le64(v, p)	(*(uint64_t *)(p) = (uint64_t)(v)) 
+
+ #define cpu_to_be64(x)			__builtin_bswap64(x)
+ #define be64_to_cpu(x)			__builtin_bswap64(x)
+ #define cpu_to_be32(x)			__builtin_bswap32(x)
+ #define be32_to_cpu(x)			__builtin_bswap32(x)
+ #define cpu_to_be16(x)			__builtin_bswap16(x)
+ #define be16_to_cpu(x)			__builtin_bswap16(x)
+
+ #define get_unaligned_be16(p)		__builtin_bswap16(*(uint16_t *)(p))
+ #define get_unaligned_be32(p)		__builtin_bswap32(*(uint32_t *)(p))
+ #define get_unaligned_be64(p)		__builtin_bswap64(*(uint64_t *)(p))
+
+ #define put_unaligned_be16(v, p)	(*(uint16_t *)(p) = __builtin_bswap16((uint16_t)(v))) 
+ #define put_unaligned_be32(v, p)	(*(uint32_t *)(p) = __builtin_bswap32((uint32_t)(v))) 
+ #define put_unaligned_be64(v, p)	(*(uint64_t *)(p) = __builtin_bswap64((uint64_t)(v))) 
+
+#else
+ #warning usermode_lib shim has been compiled on x86 only -- work required for other arch
+#endif
+
 /* Include a few real kernel files */
-#include "UMC/linux/byteorder/generic.h"
-#include "UMC/linux/unaligned/access_ok.h"
-#include "UMC/linux/unaligned/generic.h"
 #include "UMC/linux/export.h"
 #include "UMC/linux/list.h"
-
-#ifdef __x86_64__
-  #define get_unaligned			__get_unaligned_le
-  #define put_unaligned			__put_unaligned_le
-#else
-  #warning usermode_lib shim has been compiled on x86 only -- work required for other arch
-#endif
 
 /* This file (usermode_lib.h) contains the main shim implementation for emulation of
  * kernel services, using GNU C (usermode) library calls, definitions in the header
@@ -775,8 +803,8 @@ spin_lock_try(spinlock_t * lock)
     if (unlikely(pthread_mutex_trylock(&lock->plock) != 0)) {
 #ifdef UMC_LOCK_CHECKS
 	verify(lock->owner != sys_thread_current(),
-	       "Thread %d ('%s') attempts to acquire a spinlock '%s' (%p) it already holds",
-	       gettid(), sys_thread_name(sys_thread_current()), lock->name, lock);
+	       "Thread %d ('%s') attempts to acquire a spinlock '%s' (%p) it already holds (%p)",
+	       gettid(), sys_thread_name(sys_thread_current()), lock->name, lock, lock->owner);
 #endif
 	return -EBUSY;
     }
