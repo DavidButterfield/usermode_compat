@@ -23,11 +23,11 @@ allow the possibility of running SCST also on _non_-Linux systems having gcc and
 the necessary libraries.
 
 **UMC depends on**
-<A HREF="https://github.com/DavidButterfield/MTE">Multithreaded Engine (libmte)</A>
+<A HREF="https://github.com/DavidButterfield/MTE#user-content-mte">Multithreaded Engine (libmte)</A>
     &mdash; a high-performance multi-threaded usermode event dispatching engine.
 
 #### UMC Client
-<A HREF="https://github.com/DavidButterfield/SCST-Usermode-Adaptation">
+<A HREF="https://github.com/DavidButterfield/SCST-Usermode-Adaptation#user-content-scst-usermode-adaptation">
          iSCSI-SCST Storage Server Usermode Adaptation</A>
     &mdash; a port of the SCST iSCSI storage server to run entirely in usermode on an unmodified Linux kernel.
     &nbsp;
