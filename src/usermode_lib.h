@@ -98,6 +98,8 @@ extern int sysinfo (struct sysinfo *__info);
 /* Qualify a pointer so that its target is treated as volatile */
 #define _VOLATIZE(ptr)			((volatile const typeof(ptr))(ptr))
 #define WRITE_ONCE(x, val)		(*_VOLATIZE(&(x)) = (val))
+#define READ_ONCE(x)			(*_VOLATIZE(&(x)))
+#define	ACCESS_ONCE(x)			READ_ONCE(x)
 
 /* Include a few real kernel files */
 #include "UMC/linux/export.h"
@@ -2408,7 +2410,7 @@ struct class_interface {
 
 #define kfree_rcu()			FATAL(kfree_rcu)
 
-#define register_chrdev(major, name, fops)	E_OK
+#define register_chrdev(major, name, fops)	(_USE(name), E_OK)
 #define unregister_chrdev(major, name)		DO_NOTHING()
 #define scsi_register_interface(interface)	(_USE(interface), E_OK)
 #define scsi_unregister_interface(interface)	DO_NOTHING()
