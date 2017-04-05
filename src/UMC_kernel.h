@@ -20,49 +20,7 @@ typedef uint32_t			u32;
 typedef uint64_t			u64;
 typedef int32_t				s32;
 
-static __always_inline void __read_once_size(const volatile void *p, void *res, int size)
-{
-	switch (size) {
-	case 1: *(__u8 *)res = *(const volatile __u8 *)p; break;
-	case 2: *(__u16 *)res = *(const volatile __u16 *)p; break;
-	case 4: *(__u32 *)res = *(const volatile __u32 *)p; break;
-	case 8: *(__u64 *)res = *(const volatile __u64 *)p; break;
-	default:
-	    fprintf(stderr, "FATAL: __read_once_size(%p, %p(0x%llx) %u)", p, res, *(__u64 *)res, size);
-	    exit(-9);
-	}
-}
-
-static __always_inline void __write_once_size(volatile void *p, void *res, int size)
-{
-	switch (size) {
-	case 1: *(volatile __u8 *)p = *(__u8 *)res; break;
-	case 2: *(volatile __u16 *)p = *(__u16 *)res; break;
-	case 4: *(volatile __u32 *)p = *(__u32 *)res; break;
-	case 8: *(volatile __u64 *)p = *(__u64 *)res; break;
-	default:
-	    fprintf(stderr, "FATAL: __write_once_size(%p, %p(0x%llx) %u)", p, res, *(__u64 *)res, size);
-	    exit(-9);
-	}
-}
-
-#define READ_ONCE(x)					\
-({							\
-	union { typeof(x) __val; char __c[1]; } __u;	\
-	__read_once_size(&(x), __u.__c, sizeof(x));	\
-	__u.__val;					\
-})
-
-#define WRITE_ONCE(x, val)				\
-({							\
-	union { typeof(x) __val; char __c[1]; } __u =	\
-		{ .__val = (typeof(x)) (val) }; \
-	__write_once_size(&(x), __u.__c, sizeof(x));	\
-	__u.__val;					\
-})
-
-#define __ACCESS_ONCE(x) ({ (volatile typeof(x) *)&(x); })
-#define ACCESS_ONCE(x) (*__ACCESS_ONCE(x))
+//#define WRITE_ONCE(x, val)  (*(volatile typeof(x) *)&(x) = (val))
 
 /* min()/max() that do strict type-checking. Lifted from the kernel. */
 #define min(x, y) ({				\

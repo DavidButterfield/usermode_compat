@@ -95,6 +95,10 @@ extern int sysinfo (struct sysinfo *__info);
  #warning usermode_lib shim has been compiled on x86 only -- work required for other arch
 #endif
 
+/* Qualify a pointer so that its target is treated as volatile */
+#define _VOLATIZE(ptr)			((volatile const typeof(ptr))(ptr))
+#define WRITE_ONCE(x, val)		(*_VOLATIZE(&(x)) = (val))
+
 /* Include a few real kernel files */
 #include "UMC/linux/export.h"
 #include "UMC/linux/list.h"
@@ -155,9 +159,6 @@ extern int sysinfo (struct sysinfo *__info);
 	    })
 
 #define ARRAY_SIZE(a)			((int)(sizeof(a)/sizeof((a)[0])))
-
-/* Qualify a pointer so that its target is treated as volatile */
-#define _VOLATIZE(ptr)			((volatile const typeof(ptr))(ptr))
 
 /* Remove the "const" qualifier from a pointer --
 			    Places where this is needed should be fixed XXX */
