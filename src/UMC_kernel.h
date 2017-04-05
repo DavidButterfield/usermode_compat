@@ -20,8 +20,6 @@ typedef uint32_t			u32;
 typedef uint64_t			u64;
 typedef int32_t				s32;
 
-//#define WRITE_ONCE(x, val)  (*(volatile typeof(x) *)&(x) = (val))
-
 /* min()/max() that do strict type-checking. Lifted from the kernel. */
 #define min(x, y) ({				\
 	typeof(x) _min1 = (x);			\
