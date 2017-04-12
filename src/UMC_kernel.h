@@ -13,7 +13,7 @@
 #define BITS_PER_LONG			__BITS_PER_LONG
 #define BYTES_PER_LONG			(BITS_PER_LONG/8)
 
-typedef uint8_t				bool;
+typedef _Bool				bool;
 typedef uint8_t				u8;
 typedef uint16_t			u16;
 typedef uint32_t			u32;

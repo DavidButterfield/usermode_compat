@@ -57,24 +57,10 @@ extern int sysinfo (struct sysinfo *__info);
 
 #include "UMC_kernel.h"	    /* a few random definitions from kernel headers */
 
+#define get_unaligned(p)		(*(p))
+#define put_unaligned(v, p)		(void)memcpy((p), &(v), sizeof(v))
+
 #ifdef __x86_64__
-
- #define cpu_to_le64(x)			(x)
- #define le64_to_cpu(x)			(x)
- #define cpu_to_le32(x)			(x)
- #define le32_to_cpu(x)			(x)
- #define cpu_to_le16(x)			(x)
- #define le16_to_cpu(x)			(x)
-
- #define get_unaligned(p)		(*(p))
- #define get_unaligned_le16(p)		(*(uint16_t *)(p))
- #define get_unaligned_le32(p)		(*(uint32_t *)(p))
- #define get_unaligned_le64(p)		(*(uint64_t *)(p))
-
- #define put_unaligned(v, p)		(*(p) = (v)) 
- #define put_unaligned_le16(v, p)	(*(uint16_t *)(p) = (uint16_t)(v)) 
- #define put_unaligned_le32(v, p)	(*(uint32_t *)(p) = (uint32_t)(v)) 
- #define put_unaligned_le64(v, p)	(*(uint64_t *)(p) = (uint64_t)(v)) 
 
  #define cpu_to_be64(x)			__builtin_bswap64(x)
  #define be64_to_cpu(x)			__builtin_bswap64(x)
@@ -82,14 +68,26 @@ extern int sysinfo (struct sysinfo *__info);
  #define be32_to_cpu(x)			__builtin_bswap32(x)
  #define cpu_to_be16(x)			__builtin_bswap16(x)
  #define be16_to_cpu(x)			__builtin_bswap16(x)
+ #define cpu_to_le64(x)					 (x)
+ #define le64_to_cpu(x)					 (x)
+ #define cpu_to_le32(x)					 (x)
+ #define le32_to_cpu(x)					 (x)
+ #define cpu_to_le16(x)					 (x)
+ #define le16_to_cpu(x)					 (x)
 
- #define get_unaligned_be16(p)		__builtin_bswap16(*(uint16_t *)(p))
- #define get_unaligned_be32(p)		__builtin_bswap32(*(uint32_t *)(p))
- #define get_unaligned_be64(p)		__builtin_bswap64(*(uint64_t *)(p))
+ static inline uint16_t get_unaligned_be16(void const * p) { return __builtin_bswap16(*(uint16_t const *)p); }
+ static inline uint32_t get_unaligned_be32(void const * p) { return __builtin_bswap32(*(uint32_t const *)p); }
+ static inline uint64_t get_unaligned_be64(void const * p) { return __builtin_bswap64(*(uint64_t const *)p); }
+ static inline uint16_t get_unaligned_le16(void const * p) { return		     (*(uint16_t const *)p); }
+ static inline uint32_t get_unaligned_le32(void const * p) { return		     (*(uint32_t const *)p); }
+ static inline uint64_t get_unaligned_le64(void const * p) { return		     (*(uint64_t const *)p); }
 
- #define put_unaligned_be16(v, p)	(*(uint16_t *)(p) = __builtin_bswap16((uint16_t)(v))) 
- #define put_unaligned_be32(v, p)	(*(uint32_t *)(p) = __builtin_bswap32((uint32_t)(v))) 
- #define put_unaligned_be64(v, p)	(*(uint64_t *)(p) = __builtin_bswap64((uint64_t)(v))) 
+ static inline void put_unaligned_be16(uint16_t v, void * p) { *(uint16_t *)p = __builtin_bswap16(v); }
+ static inline void put_unaligned_be32(uint32_t v, void * p) { *(uint32_t *)p = __builtin_bswap32(v); }
+ static inline void put_unaligned_be64(uint64_t v, void * p) { *(uint64_t *)p = __builtin_bswap64(v); }
+ static inline void put_unaligned_le16(uint16_t v, void * p) { *(uint16_t *)p =			 (v); }
+ static inline void put_unaligned_le32(uint32_t v, void * p) { *(uint32_t *)p =			 (v); }
+ static inline void put_unaligned_le64(uint64_t v, void * p) { *(uint64_t *)p =			 (v); }
 
 #else
  #warning usermode_lib shim has been compiled on x86 only -- work required for other arch
@@ -157,7 +155,7 @@ extern int sysinfo (struct sysinfo *__info);
 #define container_of(ptr, type, member) \
 	    ({			\
 		typeof( ((type *)0)->member ) *__mptr = (ptr); /* validate type */ \
-		(type *)( (char *)__mptr - offsetof(type,member) ); \
+		(type *)( (uintptr_t)__mptr - offsetof(type,member) ); \
 	    })
 
 #define ARRAY_SIZE(a)			((int)(sizeof(a)/sizeof((a)[0])))
@@ -172,7 +170,10 @@ _unconstify(void const * cvp)
     return p.vp;
 }
 
-extern size_t UMC_size_t_JUNK;		/* for avoiding unused-value gcc warnings */
+#define _PER_THREAD			__thread
+extern _PER_THREAD struct task_struct * current;    /* current thread */
+
+extern _PER_THREAD size_t UMC_size_t_JUNK;   /* for avoiding unused-value gcc warnings */
 
 #define __CACHE_LINE_BYTES		64  /* close enough */
 #define ____cacheline_aligned		__attribute__((aligned(__CACHE_LINE_BYTES)))
@@ -193,6 +194,8 @@ _ROUNDUP(uint64_t const v, uint64_t const q) { return (v + q - 1) / q * q; }
 /* Translate an rc/errno system-call return into a kernel-style -errno return */
 #define UMC_kernelize(callret...) \
 	    ({ int u_rc = (callret); unlikely(u_rc < 0) ? -errno : u_rc; })
+#define UMC_kernelize64(callret...) \
+	    ({ ssize_t u_rc = (callret); unlikely(u_rc < 0) ? -errno : u_rc; })
 #define PTR_ERR(ptr)			((uintptr_t)(ptr))
 #define ERR_PTR(err)			((void *)(uintptr_t)(err))
 #define IS_ERR(ptr)			unlikely((unsigned long)(ptr) > (unsigned long)(-4096))
@@ -216,10 +219,10 @@ _ROUNDUP(uint64_t const v, uint64_t const q) { return (v + q - 1) / q * q; }
 #define msleep(ms)			usleep((ms) * 1000)
 
 #define simple_strtoul(str, endptr, base)   strtoul((str), (endptr), (base))
-#define strict_strtol(str, base, var)	((*var) = strtol((str), NULL, (base)))
-#define	strict_strtoll(str, base, var)	((*var) = strtoll((str), NULL, (base)))
-#define strict_strtoul(str, base, var)	((*var) = strtoul((str), NULL, (base)))
-#define	strict_strtoull(str, base, var) ((*var) = strtoull((str), NULL, (base)))
+#define strict_strtol(str, base, var)	((*var) = strtol((str), NULL, (base)), E_OK)
+#define	strict_strtoll(str, base, var)	((*var) = strtoll((str), NULL, (base)), E_OK)
+#define strict_strtoul(str, base, var)	((*var) = strtoul((str), NULL, (base)), E_OK)
+#define	strict_strtoull(str, base, var) ((*var) = strtoull((str), NULL, (base)), E_OK)
 
 static inline char *
 strnchr(const char * str, size_t strmax, int match)
@@ -242,9 +245,6 @@ strnchr(const char * str, size_t strmax, int match)
 
 extern errno_t UMC_init(char *);	/* usermode_lib.c */
 extern void UMC_exit(void);
-
-#define _PER_THREAD			__thread
-extern _PER_THREAD struct task_struct * current;    /* current thread */
 
 extern struct _irqthread * UMC_irqthread;   /* delivers "softirq" callbacks */
 
@@ -288,7 +288,7 @@ si_meminfo(struct sysinfo *si)
 
 typedef unsigned int			gfp_t;	/* kalloc flags argument type (ignored) */
 
-#define PAGE_ALIGN(addr)		(_ROUNDUP((uintptr_t)(addr), PAGE_SIZE))
+#define PAGE_ALIGN(size)		(_ROUNDUP((size), PAGE_SIZE))
 
 #define kmem_cache			sys_buf_cache
 
@@ -326,9 +326,9 @@ typedef	struct mempool {
 #define mempool_create(min_nr, alloc_fn, free_fn, kcache) \
 	    ({  assert_eq((alloc_fn), NULL); /* unused */ \
 		assert_eq((free_fn), NULL); \
-		mempool_t * _ret = vzalloc(sizeof(*_ret)); \
-		_ret->cache = (kcache); \
-		_ret; \
+		mempool_t * __ret = vzalloc(sizeof(*__ret)); \
+		__ret->cache = (kcache); \
+		__ret; \
 	    })
 
 #define mempool_create_kmalloc_pool(min_nr, size) \
@@ -477,14 +477,14 @@ bitmap_copy(unsigned long *dst, const unsigned long *src, int nbits)
 	*dst = *src;
 }
 
-static inline int
+static inline bool
 bitmap_equal(const unsigned long *src1, const unsigned long *src2, int nbits)
 {
 	assert_be(nbits, BITS_PER_LONG);
 	return ! ((*src1 ^ *src2) & BITMAP_MASK(nbits));
 }
 
-static inline unsigned int
+static inline unsigned long
 find_next_bit(const unsigned long *addr, unsigned long nbits, int startbit)
 {
     assert_be(nbits, BITS_PER_LONG);
@@ -501,7 +501,8 @@ find_next_bit(const unsigned long *addr, unsigned long nbits, int startbit)
 
 /***** Formatting and logging *****/
 
-#define scnprintf(buf, bufsize, fmtargs...) (snprintf((buf), (bufsize), fmtargs), UMC_size_t_JUNK=strlen(buf))
+#define scnprintf(buf, bufsize, fmtargs...) (snprintf((buf), (bufsize), fmtargs), \
+						      (int)(UMC_size_t_JUNK=strlen(buf)))
 
 #define kasprintf(gfp, fmt, args...)	sys_sprintf(fmt, ##args)
 #define kvasprintf(gfp, fmt, va)	sys_vsprintf(fmt, va)
@@ -1265,14 +1266,14 @@ struct task_struct {
 
 #define UMC_current_init(task, _SYS, _FN, _ENV, _COMM) \
 	    ({ \
-		struct task_struct * _t = (task); \
-		record_zero(_t); \
-		_t->SYS = (_SYS); \
-		_t->run_fn = (_FN); \
-		_t->run_env = (_ENV); \
-		_t->comm = (_COMM); \
-		trace("UMC_current_init(%p) from %s comm=%s", _t, FL_STR, _t->comm); \
-		_t; \
+		struct task_struct * __t = (task); \
+		record_zero(__t); \
+		__t->SYS = (_SYS); \
+		__t->run_fn = (_FN); \
+		__t->run_env = (_ENV); \
+		__t->comm = (_COMM); \
+		trace("UMC_current_init(%p) from %s comm=%s", __t, FL_STR, __t->comm); \
+		__t; \
 	    })
 
 #define UMC_current_set(task) \
@@ -1436,7 +1437,7 @@ kthread_stop(struct task_struct * task)
 	    task->cpus_allowed = (mask), \
 	    task->affinity_is_set = true, \
 	    (task)->pid \
-		? UMC_kernelize(sched_setaffinity(task->pid, sizeof(mask), \
+		? UMC_kernelize(sched_setaffinity(task->pid, (int)sizeof(mask), \
 						  (cpu_set_t *)&(task->cpus_allowed))) \
 		: E_OK		     )
 
@@ -1824,10 +1825,7 @@ _file_alloc(unsigned int fd, int i_type, umode_t mode, size_t size, uint32_t ope
 #define kernel_sendmsg(sock, msg, vec, nvec, nbytes) \
 	    ({  (msg)->msg_iov = (vec); \
 		(msg)->msg_iovlen = (nvec); \
-		/* These reflect current expected usage, not limitations */ \
-		expect_eq((nvec), 1, "maybe remove this warning"); \
-		expect_eq((nbytes), (vec)->iov_len, "maybe remove this warning"); \
-		UMC_kernelize(sendmsg((sock)->fd, (msg), (msg)->msg_flags)); \
+		(int)UMC_kernelize64(sendmsg((sock)->fd, (msg), (msg)->msg_flags)); \
 	    })
 
 static inline int
@@ -1850,11 +1848,11 @@ sock_recvmsg(struct socket * sock, struct msghdr * msg, size_t nbytes, int flags
 	trace("EOF on fd=%d", (sock)->fd);
     } else {
 	 if (rc != -EAGAIN) {
-	     sys_warning("ERROR %"PRId64" '%s'on fd=%d", rc, strerror(-rc), (sock)->fd);
+	     sys_warning("ERROR %"PRId64" '%s'on fd=%d", rc, strerror((int)-rc), (sock)->fd);
 	     sys_breakpoint();
 	 }
     }
-    return rc;
+    return (int)rc;
 }
 
 /* The sock->ops point to these shim functions */
@@ -1905,7 +1903,7 @@ fget(unsigned int daemon_fd)
 
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
-    socklen_t addrlen = sizeof(addr);
+    socklen_t addrlen = (int)sizeof(addr);
     int rc = getpeername(fd, &addr, &addrlen);
     if (likely(rc == 0)) {
 	sock->sk->sk_family = addr.sin_family;
@@ -2002,35 +2000,35 @@ filp_close(struct file * file, void * unused)
     _fput(file);
 }
 
-#define vfs_read(file, addr, nbytes, seekposp) \
+#define vfs_read(file, iovec, nvec, seekposp) \
 	    ({ \
-		int _rc = UMC_kernelize(pread((file)->fd, (addr), (nbytes), *(seekposp))); \
+		ssize_t _rc = UMC_kernelize64(pread((file)->fd, (iovec), (nvec), *(seekposp))); \
 		if (likely(_rc > 0)) *(seekposp) += _rc; \
 		_rc; \
 	    })
 
-#define vfs_write(file, addr, nbytes, seekposp) \
+#define vfs_write(file, iovec, nvec, seekposp) \
 	    ({ \
-		int _rc = UMC_kernelize(pwrite((file)->fd, (addr), (nbytes), *(seekposp))); \
+		ssize_t _rc = UMC_kernelize64(pwrite((file)->fd, (iovec), (nvec), *(seekposp))); \
 		if (likely(_rc > 0)) *(seekposp) += _rc; \
 		_rc; \
 	    })
 
-#define vfs_readv(file, addr, nbytes, seekposp) \
+#define vfs_readv(file, iovec, nvec, seekposp) \
 	    ({ \
-		int _rc = UMC_kernelize(preadv((file)->fd, (addr), (nbytes), *(seekposp))); \
+		ssize_t _rc = UMC_kernelize64(preadv((file)->fd, (iovec), (nvec), *(seekposp))); \
 		if (likely(_rc > 0)) *(seekposp) += _rc; \
 		_rc; \
 	    })
 
-#define vfs_writev(file, addr, nbytes, seekposp) \
+#define vfs_writev(file, iovec, nvec, seekposp) \
 	    ({ \
-		int _rc = -1; \
+		ssize_t _rc; \
 		if ((file)->inode->i_type == I_TYPE_SOCK) { \
-		    _rc = UMC_kernelize(writev((file)->fd, (addr), (nbytes))); \
+		    _rc = UMC_kernelize64(writev((file)->fd, (iovec), (nvec))); \
 		} else { \
 		    verify_eq((file)->inode->i_type, I_TYPE_FILE); \
-		    _rc = UMC_kernelize(pwritev((file)->fd, (addr), (nbytes), *(seekposp))); \
+		    _rc = UMC_kernelize64(pwritev((file)->fd, (iovec), (nvec), *(seekposp))); \
 		    if (likely(_rc > 0)) *(seekposp) += _rc; \
 		} \
 		_rc; \
@@ -2183,27 +2181,28 @@ static inline ssize_t
 seq_read(struct file * const file, void * buf, size_t size, loff_t * lofsp)
 {
     struct seq_file * seq = file->private_data;
+    assert(*lofsp >= 0);
 
     seq_fmt(seq);
 
-    uint32_t reply_len = seq->reply ? strlen(seq->reply) : 0;
+    size_t reply_size = seq->reply ? strlen(seq->reply) : 0;
 
-    if (*lofsp >= reply_len) {
-	reply_len = 0;
+    if (*(size_t *)lofsp >= reply_size) {
+	reply_size = 0;
     } else {
-	reply_len -= *lofsp;
+	reply_size -= *lofsp;
     }
 
-    if (reply_len > size) reply_len = size;
+    if (reply_size > size) reply_size = size;
 
-    if (reply_len) {
-	memcpy(buf, seq->reply + *lofsp, reply_len);
-	*lofsp += reply_len;
+    if (reply_size) {
+	memcpy(buf, seq->reply + *lofsp, reply_size);
+	*lofsp += reply_size;
     }
 
     if (seq->reply) vfree(seq->reply);
 
-    return reply_len;
+    return reply_size;
 }
 
 /* /proc is simulated by mapping our proc_dir_entry tree to the FUSE filesystem interface */
@@ -2433,7 +2432,7 @@ struct tasklet_struct { };
 #define preempt_disable()		DO_NOTHING()
 #define preempt_enable()		DO_NOTHING()
 
-extern uint64_t crc32c_uniq;	//XXX hack makes these unique -- no good for matching
+extern uint32_t crc32c_uniq;	//XXX hack makes these unique -- no good for matching
 #define crc32c(x, y, z)			(++crc32c_uniq)
 
 /////////////////////////////////

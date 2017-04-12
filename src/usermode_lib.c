@@ -22,9 +22,9 @@ static struct task_struct UMC_init_current_space;
 
 struct _irqthread * UMC_irqthread;   /* delivers "softirq" callbacks */
 
-uint64_t crc32c_uniq;	//XXX hack makes these unique -- no good for matching
+uint32_t crc32c_uniq;	//XXX hack makes these unique -- no good for matching
 
-size_t UMC_size_t_JUNK = 0;	/* for avoiding unused-value gcc warnings */
+_PER_THREAD size_t UMC_size_t_JUNK = 0;	/* for avoiding unused-value gcc warnings */
 
 /* Initialize the usermode_lib usermode compatibility module */
 errno_t
@@ -200,7 +200,7 @@ UMC_delayed_work_process(uintptr_t u_dwork)
 ssize_t
 sock_no_sendpage(struct socket *sock, struct page *page, int offset, size_t size, int flags)
 {
-    return UMC_kernelize(send((sock)->fd, page_address(page) + (offset), (size), (flags)));
+    return UMC_kernelize64(send((sock)->fd, page_address(page) + (offset), (size), (flags)));
 }
 
 void
