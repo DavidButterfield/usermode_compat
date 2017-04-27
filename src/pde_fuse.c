@@ -419,8 +419,6 @@ pde_tree_fmt(struct proc_dir_entry * pde_root)
 static volatile sys_thread_t PDE_FUSE_THREAD;
 char * FUSE_PROC_ROOT;
 
-extern void sigint_hack(void);
-
 /* Here starting up on the pde_fuse thread */
 static int
 pde_fuse_run(void * unused)
@@ -469,12 +467,6 @@ pde_fuse_run(void * unused)
 	sys_warning("fuse_main returned %d -- FUSE thread exits", ret);
     }
 
-    /* XXX Hack: Sometimes the fuse thread steals the SIGINT and the MTE
-     *     sigfd_handler can't read the signal.  Anyway, the fuse thread
-     *     should not be exiting unless the program is shutting down.
-     */     
-    sigint_hack();
-    
     UMC_current_free(current);
     UMC_current_set(NULL);
 
