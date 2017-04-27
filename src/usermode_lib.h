@@ -126,7 +126,7 @@ extern int sysinfo (struct sysinfo *__info);
 /* For stubbing out unused functions, macro arguments, etc */
 #define IGNORED				0
 #define DO_NOTHING(USED...)		do { USED; } while (0)
-#define FATAL(fn, ret...)		(sys_panic("REACHED UNIMPLEMENTED FUNCTION %s", #fn), ##ret)
+#define FATAL(fn, ret...)		({ sys_panic("REACHED UNIMPLEMENTED FUNCTION %s", #fn); (uintptr_t)(ret+0); })
 
 /* Avoid compiler warnings for stubbed-out macro arguments */
 #define _USE(x)				({ if (0 && (uintptr_t)(x)==0) {}; 0; })
