@@ -251,7 +251,7 @@ extern struct _irqthread * UMC_irqthread;   /* delivers "softirq" callbacks */
 /***** Memory *****/
 
 #ifndef PAGE_SHIFT
-#define PAGE_SHIFT			16U	//XXXXXX 12U	/* need not match real kernel */
+#define PAGE_SHIFT			16U /* need not match real kernel */
 #endif
 
 #define PAGE_SIZE			(1UL<<PAGE_SHIFT)
@@ -368,6 +368,7 @@ typedef	struct mempool {
 
 #define kmemdup(addr, len, gfp)		memcpy(kalloc((len), (gfp)), (addr), (len))
 #define kstrdup(string, gfp)		kmemdup((string), 1+strlen(string), (gfp))
+#define vstrdup(string)			kstrdup((string), IGNORED)
 #define strlcpy(dst, src, size)		(dst[(size)-1] = '\0', strncpy((dst), (src), (size)-1), UMC_size_t_JUNK=strlen(dst))
 
 #define copy_from_user(dst, src, len)	(memcpy((dst), (src), (len)), E_OK)
@@ -2400,6 +2401,8 @@ struct kobj_type {
 
 #define kobject_init(kobj)		DO_NOTHING()
 #define kobject_put(kobj)		DO_NOTHING()
+
+struct device { struct device * parent; struct kobject *kobj; };
 
 struct class_device;
 struct class_interface {
