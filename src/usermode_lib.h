@@ -75,19 +75,21 @@ extern int sysinfo (struct sysinfo *__info);
  #define cpu_to_le16(x)					 (x)
  #define le16_to_cpu(x)					 (x)
 
- static inline uint16_t get_unaligned_be16(void const * p) { return __builtin_bswap16(*(uint16_t const *)p); }
- static inline uint32_t get_unaligned_be32(void const * p) { return __builtin_bswap32(*(uint32_t const *)p); }
- static inline uint64_t get_unaligned_be64(void const * p) { return __builtin_bswap64(*(uint64_t const *)p); }
- static inline uint16_t get_unaligned_le16(void const * p) { return		     (*(uint16_t const *)p); }
- static inline uint32_t get_unaligned_le32(void const * p) { return		     (*(uint32_t const *)p); }
- static inline uint64_t get_unaligned_le64(void const * p) { return		     (*(uint64_t const *)p); }
+#define _DIRTY	__attribute__((__no_sanitize_undefined__))
 
- static inline void put_unaligned_be16(uint16_t v, void * p) { *(uint16_t *)p = __builtin_bswap16(v); }
- static inline void put_unaligned_be32(uint32_t v, void * p) { *(uint32_t *)p = __builtin_bswap32(v); }
- static inline void put_unaligned_be64(uint64_t v, void * p) { *(uint64_t *)p = __builtin_bswap64(v); }
- static inline void put_unaligned_le16(uint16_t v, void * p) { *(uint16_t *)p =			 (v); }
- static inline void put_unaligned_le32(uint32_t v, void * p) { *(uint32_t *)p =			 (v); }
- static inline void put_unaligned_le64(uint64_t v, void * p) { *(uint64_t *)p =			 (v); }
+static inline _DIRTY uint16_t get_unaligned_be16(void const * p) { return __builtin_bswap16(*(uint16_t const *)p); }
+static inline _DIRTY uint32_t get_unaligned_be32(void const * p) { return __builtin_bswap32(*(uint32_t const *)p); }
+static inline _DIRTY uint64_t get_unaligned_be64(void const * p) { return __builtin_bswap64(*(uint64_t const *)p); }
+static inline _DIRTY uint16_t get_unaligned_le16(void const * p) { return		     (*(uint16_t const *)p); }
+static inline _DIRTY uint32_t get_unaligned_le32(void const * p) { return		     (*(uint32_t const *)p); }
+static inline _DIRTY uint64_t get_unaligned_le64(void const * p) { return		     (*(uint64_t const *)p); }
+
+static inline _DIRTY void put_unaligned_be16(uint16_t v, void * p) { *(uint16_t *)p = __builtin_bswap16(v); }
+static inline _DIRTY void put_unaligned_be32(uint32_t v, void * p) { *(uint32_t *)p = __builtin_bswap32(v); }
+static inline _DIRTY void put_unaligned_be64(uint64_t v, void * p) { *(uint64_t *)p = __builtin_bswap64(v); }
+static inline _DIRTY void put_unaligned_le16(uint16_t v, void * p) { *(uint16_t *)p =			 (v); }
+static inline _DIRTY void put_unaligned_le32(uint32_t v, void * p) { *(uint32_t *)p =			 (v); }
+static inline _DIRTY void put_unaligned_le64(uint64_t v, void * p) { *(uint64_t *)p =			 (v); }
 
 #else
  #warning usermode_lib shim has been compiled on x86 only -- work required for other arch
@@ -292,12 +294,23 @@ typedef unsigned int			gfp_t;	/* kalloc flags argument type (ignored) */
 
 #define kmem_cache			sys_buf_cache
 
-#define kmem_cache_create(name, size, align, gfp, constructor) ({ \
-	    assert_eq(constructor, NULL); /* XXX kmem_cache constuctor unsupported */ \
-	    sys_buf_cache_create((name), (size), (align) ? :  __CACHE_LINE_BYTES );  })
+static inline struct kmem_cache *
+kmem_cache_create(string_t name, size_t size, size_t req_align,
+		   unsigned int flags, void * constructor)
+{
+    size_t min_align;
+    assert_eq(constructor, NULL);   /* XXX kmem_cache constuctor unsupported */
 
-#define KMEM_CACHE(s, gfp) \
-	    kmem_cache_create(#s, sizeof(struct s), KMEM_CACHE_ALIGN_MIN, (gfp), 0)
+    if (flags & SLAB_HWCACHE_ALIGN) min_align = __CACHE_LINE_BYTES;
+    else min_align = sizeof(uint64_t);
+
+    if (min_align < req_align) min_align = req_align;
+
+    return sys_buf_cache_create(name, size, min_align);
+}
+
+#define KMEM_CACHE(s, flags) \
+	    kmem_cache_create(#s, sizeof(struct s), __alignof__(struct s), (flags), 0)
 
 #define kmem_cache_destroy(cache)	sys_buf_cache_destroy(cache)
 

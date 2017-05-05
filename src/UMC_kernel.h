@@ -13,6 +13,8 @@
 #define BITS_PER_LONG			__BITS_PER_LONG
 #define BYTES_PER_LONG			(BITS_PER_LONG/8)
 
+#define SLAB_HWCACHE_ALIGN      0x00002000UL    /* Align objs on cache lines */
+
 typedef _Bool				bool;
 typedef uint8_t				u8;
 typedef uint16_t			u16;
