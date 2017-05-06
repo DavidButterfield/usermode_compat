@@ -183,7 +183,7 @@ extern _PER_THREAD size_t UMC_size_t_JUNK;   /* for avoiding unused-value gcc wa
 
 typedef uint64_t __attribute__((aligned(8))) aligned_u64;
 
-#define ilog2(v)	    (likely((v) > 0) ? 63 - __builtin_clzl((uint64_t)(v)) : -1)
+#define ilog2(v)    (likely((uint64_t)(v) > 0) ? 63 - __builtin_clzl((uint64_t)(v)) : -1)
 
 #define hash_long(val, ORDER)		( (val) % ( 1 << (ORDER) ) )
 
