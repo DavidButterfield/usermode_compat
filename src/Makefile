@@ -1,17 +1,18 @@
 # UMC/trunk/src/Makefile
 # Makefile for usermode compatibility for Linux kernel source code
 # Imports optional SYS_SERVICE_INCL, CFLAGS, MY_KERNEL
-MY_CFLAGS=
-#MY_CFLAGS=-include/home/dave/SVN/SCST/trunk/usermode/../usermode/scst_compat.h
 
-# MY_CFLAGS += -DDEBUG
+MY_CFLAGS += -DDEBUG
+MY_CFLAGS += -fsanitize=undefined
+# MY_CFLAGS += -DNDEBUG
 # MY_CFLAGS += -DTRACE_TRACE
 # MY_CFLAGS += -DTRACE_VERBOSE
 
-# MY_CFLAGS += -O3
-# MY_CFLAGS += -O3 -fno-strict-aliasing
-MY_CFLAGS += -O2
+# MY_CFLAGS += -Og
 # MY_CFLAGS += -O1
+# MY_CFLAGS += -O2
+# MY_CFLAGS += -O3 -fno-strict-aliasing
+# MY_CFLAGS += -O3
 
 # disable most of the memory checks remaining when !DEBUG
 # MY_CFLAGS += -DOPTIMIZED
