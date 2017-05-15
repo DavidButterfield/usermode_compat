@@ -28,10 +28,8 @@ ifndef SYS_SERVICE_INCL
 SYS_SERVICE_INCL=../../../MTE/trunk/include
 endif
 
-ifdef SYS_SERVICE_INCL
 MY_CFLAGS += -I$(SYS_SERVICE_INCL)
 MTELIB_H := $(SYS_SERVICE_INCL)/mtelib.h
-endif
 
 ### Place to get real kernel header files (does not have to be the current kernel)
 ifndef MY_KERNEL
@@ -125,13 +123,13 @@ extraclean: clean
 kinclude:
 	### Create empty files so #includes of them successfully do nothing
 	### These get #included by the SCST kernel files when compiling for SCST_USERMODE
-	mkdir -p kinclude/{asm,asm-generic,net,scsi}
+	@mkdir -p kinclude/{asm,asm-generic,net,scsi}
 	@touch kinclude/asm/{atomic.h,checksum.h,div64.h,io.h,kmap_types.h,uaccess.h,unaligned.h}
 	@touch kinclude/asm-generic/{iomap.h,kmap_types.h,memory_model.h}
 	@touch kinclude/net/{sock.h,tcp.h,tcp_states.h}
 	@touch kinclude/scsi/{scsi_device.h,scsi_driver.h,scsi_host.h}
 	@#
-	mkdir -p kinclude/linux
+	@mkdir -p kinclude/linux
 	@touch kinclude/linux/{autoconf.h,bio.h,blkdev.h,bug.h,compiler.h,cpumask.h}
 	@touch kinclude/linux/{crc32c.h,crc-t10dif.h,ctype.h,delay.h,dma-mapping.h}
 	@touch kinclude/linux/{fcntl.h,file.h,hash.h,init.h,interrupt.h,ip.h,kernel.h}
@@ -141,44 +139,48 @@ kinclude:
 	@touch kinclude/linux/{seq_file.h,slab.h,spinlock.h,swap.h,syscalls.h,sysfs.h}
 	@touch kinclude/linux/{time.h,timer.h,uaccess.h,uio.h,vermagic.h,version.h}
 	@touch kinclude/linux/{vmalloc.h,wait.h,workqueue.h,writeback.h}
+	@touch kinclude/linux/{err.h,atomic.h,rnetlink.h,string.h}  # ib_srpt
 	@#
-	mkdir -p kinclude/rdma
-	@touch kinclude/rdma/ib_verbs.h
+	@mkdir -p kinclude/rdma
+	@touch kinclude/rdma/{ib_verbs.h,ib_cache.h}
 	@#
-	### These correspond to the /UMC/ names linked below
-	mkdir -p kinclude/linux/{unaligned,byteorder}
+	@### These correspond to the /UMC/ names linked below
+	@mkdir -p kinclude/linux/{unaligned,byteorder}
 	@touch kinclude/linux/byteorder/generic.h
 	@touch kinclude/linux/unaligned/access_ok.h
 	@touch kinclude/linux/unaligned/generic.h
 	@touch kinclude/linux/export.h
 	@touch kinclude/linux/list.h
 	@#
-	mkdir -p kinclude/scsi
+	@mkdir -p kinclude/scsi
 	@touch kinclude/scsi/scsi_proto.h
 	@touch kinclude/scsi/scsi_common.h
 	@touch kinclude/scsi/scsi.h
 	@touch kinclude/scsi/scsi_cmnd.h
 	@touch kinclude/scsi/scsi_eh.h
 	@#
-	### Create links to a few kernel headers we really do want to include.
-	### Give them /UMC/ names so they are only included explicitly;
-	### without the UMC name the dummy empty header file gets included.
-	###
-	### These are only included from usermode_lib.h
-	mkdir -p kinclude/UMC/linux/{unaligned,byteorder}
-	mkdir -p kinclude/UMC/uapi/linux/byteorder
-	ln -s $(MY_KERNEL)/include/uapi/linux/byteorder/little_endian.h kinclude/UMC/uapi/linux/byteorder/
-	ln -s $(MY_KERNEL)/include/linux/byteorder/generic.h	kinclude/UMC/linux/byteorder/
-	ln -s $(MY_KERNEL)/include/linux/unaligned/access_ok.h	kinclude/UMC/linux/unaligned/
-	ln -s $(MY_KERNEL)/include/linux/unaligned/generic.h	kinclude/UMC/linux/unaligned/
-	ln -s $(MY_KERNEL)/include/linux/export.h		kinclude/UMC/linux/
-	ln -s $(MY_KERNEL)/include/linux/list.h			kinclude/UMC/linux/
-	#
-	### These are only included from scst_compat.h
-	mkdir -p kinclude/UMC/scsi
-	ln -s $(MY_KERNEL)/include/scsi/scsi.h			kinclude/UMC/scsi/
-	ln -s $(MY_KERNEL)/include/scsi/scsi_cmnd.h		kinclude/UMC/scsi/
-	ln -s $(MY_KERNEL)/include/scsi/scsi_eh.h		kinclude/UMC/scsi/
-	ln -s $(MY_KERNEL)/include/scsi/scsi_proto.h		kinclude/UMC/scsi/
-	ln -s $(MY_KERNEL)/include/scsi/scsi_common.h		kinclude/UMC/scsi/
-
+	@### Create links to a few kernel headers we really do want to include.
+	@### Give them /UMC/ names so they are only included explicitly;
+	@### without the UMC name the dummy empty header file gets included.
+	@###
+	@### These are only included from usermode_lib.h
+	@mkdir -p kinclude/UMC/linux/{unaligned,byteorder}
+	@mkdir -p kinclude/UMC/uapi/linux/byteorder
+	@ln -s $(MY_KERNEL)/include/uapi/linux/byteorder/little_endian.h kinclude/UMC/uapi/linux/byteorder/
+	@ln -s $(MY_KERNEL)/include/linux/byteorder/generic.h	kinclude/UMC/linux/byteorder/
+	@ln -s $(MY_KERNEL)/include/linux/unaligned/access_ok.h	kinclude/UMC/linux/unaligned/
+	@ln -s $(MY_KERNEL)/include/linux/unaligned/generic.h	kinclude/UMC/linux/unaligned/
+	@ln -s $(MY_KERNEL)/include/linux/export.h		kinclude/UMC/linux/
+	@ln -s $(MY_KERNEL)/include/linux/list.h			kinclude/UMC/linux/
+	@#
+	@### These are only included from scst_compat.h
+	@mkdir -p kinclude/UMC/scsi
+	@ln -s $(MY_KERNEL)/include/scsi/scsi.h			kinclude/UMC/scsi/
+	@ln -s $(MY_KERNEL)/include/scsi/scsi_cmnd.h		kinclude/UMC/scsi/
+	@ln -s $(MY_KERNEL)/include/scsi/scsi_eh.h		kinclude/UMC/scsi/
+	@ln -s $(MY_KERNEL)/include/scsi/scsi_proto.h		kinclude/UMC/scsi/
+	@ln -s $(MY_KERNEL)/include/scsi/scsi_common.h		kinclude/UMC/scsi/
+	@#
+	@###
+	@ln -s $(MY_KERNEL)/include/scsi/srp.h			kinclude/UMC/scsi/
+	@ln -s $(MY_KERNEL)/include/rdma/ib_mad.h		kinclude/UMC/rdma/
