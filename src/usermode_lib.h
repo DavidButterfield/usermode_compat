@@ -128,7 +128,7 @@ static inline _DIRTY void put_unaligned_le64(uint64_t v, void * p) { *(uint64_t 
 /* For stubbing out unused functions, macro arguments, etc */
 #define IGNORED				0
 #define DO_NOTHING(USED...)		do { USED; } while (0)
-#define FATAL(fn, ret...)		({ sys_panic("REACHED UNIMPLEMENTED FUNCTION %s", #fn); (uintptr_t)(ret+0); })
+#define FATAL(fn)			({ sys_panic("REACHED UNIMPLEMENTED FUNCTION %s", #fn); 0ul; })
 
 /* Avoid compiler warnings for stubbed-out macro arguments */
 #define _USE(x)				({ if (0 && (uintptr_t)(x)==0) {}; 0; })
@@ -185,7 +185,7 @@ typedef uint64_t __attribute__((aligned(8))) aligned_u64;
 
 #define ilog2(v)    (likely((uint64_t)(v) > 0) ? 63 - __builtin_clzl((uint64_t)(v)) : -1)
 
-#define hash_long(val, ORDER)		( (val) % ( 1 << (ORDER) ) )
+#define hash_long(val, ORDER)		( (val) % ( 1ul << (ORDER) ) )
 
 static inline uint64_t
 _ROUNDDOWN(uint64_t const v, uint64_t const q) { return v / q * q; }
@@ -404,7 +404,7 @@ struct page { char bytes[PAGE_SIZE]; };
 #define page_to_pfn(page)		((uintptr_t)page_address(page) >> PAGE_SHIFT)
 
 #define alloc_page(gfp)			((struct page *)kalloc(PAGE_SIZE, (gfp)))
-#define alloc_pages(gfp, order)		((struct page *)kalloc((1<<(order)) * PAGE_SIZE, (gfp)))
+#define alloc_pages(gfp, order)		((struct page *)kalloc((1ul<<(order)) * PAGE_SIZE, (gfp)))
 #define __free_page(page)		kfree(page_address(page))
 #define __free_pages(page, order)	kfree(page_address(page))
 #define nth_page(page, n)		((void *)(page) + (n)*PAGE_SIZE)
@@ -1248,7 +1248,7 @@ struct completion {
 #define complete(c) \
 	    do { atomic_inc(&(c)->done);        wake_up(    &(c)->wait); } while (0)
 #define complete_all(c) \
-	    do { atomic_set(&(c)->done, 1<<30); wake_up_all(&(c)->wait); } while (0)
+	    do { atomic_set(&(c)->done, 1ul<<30); wake_up_all(&(c)->wait); } while (0)
 
 /*** kthreads (simulated kernel threads) ***/
 
@@ -1363,9 +1363,6 @@ _kthread_create(errno_t (*fn)(void * env), void * env, string_t name)
 
     return task;
 }
-
-#define kthread_create_on_node(fn, env, nodeid, fmtargs...) \
-	    (_USE(nodeid), _kthread_create((fn), (env), sys_sprintf(fmtargs)))
 
 /* Start a previously-created kthread -- returns after new process is ready for use */
 #define wake_up_process(task)		kthread_start(task)
