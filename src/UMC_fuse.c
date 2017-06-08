@@ -1,14 +1,14 @@
-/* pde_fuse.c
+/* UMC_fuse.c
  * Usermode emulation for kernel-code /proc consumers running in usemode, using FUSE
  * Copyright 2016 David A. Butterfield
  *
  * proc_create_data() and remove_proc_entry() are used by the program to build a tree of
  * "/proc directory entries" representing the filesystem structure.
  *
- * pde_fuse_getattr, pde_fuse_readdir, pde_fuse_open, pde_fuse_read, and pde_fuse_write
+ * UMC_fuse_getattr, UMC_fuse_readdir, UMC_fuse_open, UMC_fuse_read, and UMC_fuse_write
  * are called by FUSE when an external application accesses or writes one of our nodes.
  *
- * pde_fuse_start, pde_fuse_stop, and pde_fuse_exit initialize and/or free resources.
+ * UMC_fuse_start, UMC_fuse_stop, and UMC_fuse_exit initialize and/or free resources.
  */
 #include <sys/types.h>
 #include <inttypes.h>
@@ -25,7 +25,7 @@
 #define _FILE_OFFSET_BITS 64	/* fuse seems to want this even on 64-bit */
 #include <fuse.h>
 
-#define NAME PDE_FUSE
+#define NAME UMC_FUSE
 #include "usermode_lib.h"
 #include "sys_debug.h"
 
@@ -294,7 +294,7 @@ pde_read(struct proc_dir_entry * pde_root, char const * path,
     return ret;
 }
 
-DEFINE_MUTEX(pde_fuse_lock);		    //XXX nasty big lock could be fixed
+DEFINE_MUTEX(UMC_fuse_lock);		    //XXX nasty big lock could be fixed
 
 /* Lookup a file path and call the write function of the corresponding PDE node */
 static ssize_t
@@ -320,12 +320,12 @@ pde_write(struct proc_dir_entry * pde_root, char const * path,
     expect_noerr(err, "pde[%s]->proc_fops->open", pde->name);
     if (err != E_OK) return err;
 
-    mutex_unlock(&pde_fuse_lock);
+    mutex_unlock(&UMC_fuse_lock);
 
     ssize_t ret = pde->proc_fops->write(file, buf, size, &ofs);
-    expect_eq(ret, size, "pde[%s]->proc_fops->write", pde->name);
+    // expect_eq(ret, size, "pde[%s]->proc_fops->write", pde->name);
 
-    mutex_lock(&pde_fuse_lock);
+    mutex_lock(&UMC_fuse_lock);
 
     err = pde->proc_fops->release(file->inode, file);
     expect_noerr(err, "pde[%s]->proc_fops->release", pde->name);
@@ -343,32 +343,32 @@ static struct proc_dir_entry * PDE_ROOT;    //XXX limitation: single instance
 
 
 static errno_t
-pde_fuse_getattr(sstring_t path, struct stat * st)
+UMC_fuse_getattr(sstring_t path, struct stat * st)
 {
-    mutex_lock(&pde_fuse_lock);
+    mutex_lock(&UMC_fuse_lock);
     errno_t err = pde_getattr(PDE_ROOT, path, st);
-    mutex_unlock(&pde_fuse_lock);
+    mutex_unlock(&UMC_fuse_lock);
     return err;
 }
 
 static errno_t
-pde_fuse_readdir(char const * path, void * buf,
+UMC_fuse_readdir(char const * path, void * buf,
 		 fuse_fill_dir_t filler, off_t ofs, struct fuse_file_info * fi)
 {
-    mutex_lock(&pde_fuse_lock);
+    mutex_lock(&UMC_fuse_lock);
     errno_t err = pde_readdir(PDE_ROOT, path, buf, filler, ofs);
-    mutex_unlock(&pde_fuse_lock);
+    mutex_unlock(&UMC_fuse_lock);
     return err;
 }
 
 static int
-pde_fuse_open(char const * path, struct fuse_file_info * fi)
+UMC_fuse_open(char const * path, struct fuse_file_info * fi)
 {
     trace_verbose("%s", path);
 
-    mutex_lock(&pde_fuse_lock);
+    mutex_lock(&UMC_fuse_lock);
     struct proc_dir_entry * pde = pde_lookup(PDE_ROOT, path);
-    mutex_unlock(&pde_fuse_lock);
+    mutex_unlock(&UMC_fuse_lock);
 
     if (!pde) return -ENOENT;
     if (S_ISDIR(pde->mode)) return -EISDIR;
@@ -381,29 +381,29 @@ pde_fuse_open(char const * path, struct fuse_file_info * fi)
 }
 
 static int
-pde_fuse_read(char const * path, char * buf, size_t size, off_t ofs, struct fuse_file_info * fi)
+UMC_fuse_read(char const * path, char * buf, size_t size, off_t ofs, struct fuse_file_info * fi)
 {
-    mutex_lock(&pde_fuse_lock);
+    mutex_lock(&UMC_fuse_lock);
     ssize_t ret = pde_read(PDE_ROOT, path, buf, size, ofs);
-    mutex_unlock(&pde_fuse_lock);
+    mutex_unlock(&UMC_fuse_lock);
     return ret;
 }
 
 static int
-pde_fuse_write(char const * path, char const * buf, size_t size, off_t ofs, struct fuse_file_info * fi)
+UMC_fuse_write(char const * path, char const * buf, size_t size, off_t ofs, struct fuse_file_info * fi)
 {
-    mutex_lock(&pde_fuse_lock);
+    mutex_lock(&UMC_fuse_lock);
     ssize_t ret = pde_write(PDE_ROOT, path, buf, size, ofs);
-    mutex_unlock(&pde_fuse_lock);
+    mutex_unlock(&UMC_fuse_lock);
     return ret;
 }
 
 static struct fuse_operations const pde_ops = {
-    .getattr	= pde_fuse_getattr,
-    .readdir	= pde_fuse_readdir,
-    .open	= pde_fuse_open,
-    .read	= pde_fuse_read,
-    .write	= pde_fuse_write,
+    .getattr	= UMC_fuse_getattr,
+    .readdir	= UMC_fuse_readdir,
+    .open	= UMC_fuse_open,
+    .read	= UMC_fuse_read,
+    .write	= UMC_fuse_write,
 };
 
 /******************************************************************************/
@@ -416,24 +416,24 @@ pde_tree_fmt(struct proc_dir_entry * pde_root)
     return _pde_tree_fmt(pde_root->child, 1);
 }
 
-static volatile sys_thread_t PDE_FUSE_THREAD;
+static volatile sys_thread_t UMC_FUSE_THREAD;
 char * FUSE_PROC_ROOT;
 
-/* Here starting up on the pde_fuse thread */
+/* Here starting up on the UMC_fuse thread */
 static int
-pde_fuse_run(void * unused)
+UMC_fuse_run(void * unused)
 {
     assert_eq(unused, NULL);
-    assert_eq(sys_thread_current(), PDE_FUSE_THREAD);
+    assert_eq(sys_thread_current(), UMC_FUSE_THREAD);
     assert(FUSE_PROC_ROOT);
 
-    /* XXXX setup pde_fuse "current" -- change this to start a "kernel thread" */
+    /* XXXX setup UMC_fuse "current" -- change this to start a "kernel thread" */
     struct task_struct * task = UMC_current_alloc();
-    UMC_current_init(task, sys_thread_current(), (void *)pde_fuse_run, unused,
-		     kstrdup("pde_fuse thread", IGNORED));
+    UMC_current_init(task, sys_thread_current(), (void *)UMC_fuse_run, unused,
+		     kstrdup("UMC_fuse thread", IGNORED));
     UMC_current_set(task);
 
-    char /*const*/ * pde_fuse_argv[] = {
+    char /*const*/ * UMC_fuse_argv[] = {
 	"fuse_main",		    /* argv[0] */
 	FUSE_PROC_ROOT,		    /* mount point */
 
@@ -454,12 +454,12 @@ pde_fuse_run(void * unused)
 	NULL
     };
 
-    int pde_fuse_argc = ARRAY_SIZE(pde_fuse_argv) - 1;
+    int UMC_fuse_argc = ARRAY_SIZE(UMC_fuse_argv) - 1;
 
-    sys_notice("pde_fuse thread @%p starts up on tid=%u",
+    sys_notice("UMC_fuse thread @%p starts up on tid=%u",
 	       sys_thread_current(), sys_thread_num(sys_thread_current()));
 
-    int ret = fuse_main(pde_fuse_argc, pde_fuse_argv, &pde_ops, NULL);
+    int ret = fuse_main(UMC_fuse_argc, UMC_fuse_argv, &pde_ops, NULL);
 
     if (ret == E_OK) {
 	sys_notice("fuse_main returned %d -- FUSE thread exits", ret);
@@ -470,17 +470,17 @@ pde_fuse_run(void * unused)
     UMC_current_free(current);
     UMC_current_set(NULL);
 
-    assert_eq(sys_thread_current(), PDE_FUSE_THREAD);
-    PDE_FUSE_THREAD = NULL;
+    assert_eq(sys_thread_current(), UMC_FUSE_THREAD);
+    UMC_FUSE_THREAD = NULL;
     sys_thread_exit(0);
 }
 
-/* Call once from any thread to initialize PDE_ROOT and start PDE_FUSE_THREAD */
+/* Call once from any thread to initialize PDE_ROOT and start UMC_FUSE_THREAD */
 errno_t
-pde_fuse_start(char * mountpoint)
+UMC_fuse_start(char * mountpoint)
 {
     // trace_init(true, false);
-    assert(!PDE_FUSE_THREAD);
+    assert(!UMC_FUSE_THREAD);
     assert(!PDE_ROOT);
     assert(!FUSE_PROC_ROOT);
     assert(mountpoint);
@@ -497,10 +497,10 @@ pde_fuse_start(char * mountpoint)
 
     sys_notice("created /proc PDE_ROOT @%p -- starting fuse service", PDE_ROOT);
 
-    PDE_FUSE_THREAD = sys_thread_alloc(pde_fuse_run, NULL, kstrdup("pde_fuse", IGNORED));
+    UMC_FUSE_THREAD = sys_thread_alloc(UMC_fuse_run, NULL, kstrdup("UMC_fuse", IGNORED));
 
-    errno_t err = sys_thread_start(PDE_FUSE_THREAD);
-    expect_noerr(err, "sys_thread_start PDE_FUSE_THREAD");
+    errno_t err = sys_thread_start(UMC_FUSE_THREAD);
+    expect_noerr(err, "sys_thread_start UMC_FUSE_THREAD");
     if (err != E_OK) {
 	vfree(PDE_ROOT);
 	PDE_ROOT = NULL;
@@ -510,20 +510,20 @@ pde_fuse_start(char * mountpoint)
 }
 
 errno_t
-pde_fuse_exit(void)
+UMC_fuse_exit(void)
 {
     trace();
     assert(PDE_ROOT);
 
-    /* Need to shutdown fuse thread before calling pde_fuse_exit() */
-    if (PDE_FUSE_THREAD) {
-	sys_warning("pde_fuse_exit called while PDE_FUSE_THREAD still active");
+    /* Need to shutdown fuse thread before calling UMC_fuse_exit() */
+    if (UMC_FUSE_THREAD) {
+	sys_warning("UMC_fuse_exit called while UMC_FUSE_THREAD still active");
 	return -EBUSY;
     }
 
     /* Need to remove PDE tree members before root */
     if (PDE_ROOT->child) {
-	sys_warning("pde_fuse_exit called while PDE_ROOT still has children");
+	sys_warning("UMC_fuse_exit called while PDE_ROOT still has children");
 	return -EBUSY;
     }
 
@@ -534,10 +534,10 @@ pde_fuse_exit(void)
 }
 
 errno_t
-pde_fuse_stop(void)
+UMC_fuse_stop(void)
 {
-    /* If we prod the fuse thread it will return from fuse_main to pde_fuse_run */
-    sys_thread_t fusethread = PDE_FUSE_THREAD;
+    /* If we prod the fuse thread it will return from fuse_main to UMC_fuse_run */
+    sys_thread_t fusethread = UMC_FUSE_THREAD;
     if (!fusethread) return -EINVAL;
 
     trace("tkill %d, SIGTERM", fusethread->tid);
@@ -545,11 +545,11 @@ pde_fuse_stop(void)
     expect_eq(rc, 0, "tgkill fuse tid=%u errno=%d '%s'",
 		     fusethread->tid, errno, strerror(errno));
 
-    /* Wait for fuse thread to return to pde_fuse_run */
+    /* Wait for fuse thread to return to UMC_fuse_run */
     int max = 1000;
-    while (PDE_FUSE_THREAD) {
+    while (UMC_FUSE_THREAD) {
 	if (!max--) {
-	    sys_warning("pde_fuse thread didn't exit timely");
+	    sys_warning("UMC_fuse thread didn't exit timely");
 	    return -EBUSY;
 	}
 	usleep(1000);
@@ -567,11 +567,11 @@ struct proc_dir_entry *
 pde_create(char const * name, umode_t mode, struct proc_dir_entry * parent,
 				    struct file_operations const * fops, void * data)
 {
-    mutex_lock(&pde_fuse_lock);
+    mutex_lock(&UMC_fuse_lock);
 
     if (!parent) parent = PDE_ROOT;
     struct proc_dir_entry * ret = pde_node_add(name, mode, parent, fops, data);
-    mutex_unlock(&pde_fuse_lock);
+    mutex_unlock(&UMC_fuse_lock);
     return ret;
 }
 
@@ -579,12 +579,12 @@ pde_create(char const * name, umode_t mode, struct proc_dir_entry * parent,
 struct proc_dir_entry *
 pde_remove(char const * name, struct proc_dir_entry * parent)
 {
-    mutex_lock(&pde_fuse_lock);
+    mutex_lock(&UMC_fuse_lock);
 
     if (!parent) parent = PDE_ROOT;
     struct proc_dir_entry * node = pde_node_remove(name, parent);
 
-    mutex_unlock(&pde_fuse_lock);
+    mutex_unlock(&UMC_fuse_lock);
 
     if (node == NULL) {
 	sys_warning("proc_dir_entry %s not found in %s", name, parent->name);

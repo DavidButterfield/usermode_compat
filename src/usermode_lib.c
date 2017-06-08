@@ -27,8 +27,9 @@ uint32_t crc32c_uniq;	//XXX hack makes these unique -- no good for matching
 _PER_THREAD size_t UMC_size_t_JUNK = 0;	/* for avoiding unused-value gcc warnings */
 
 /* Initialize the usermode_lib usermode compatibility module */
+/* mountname is the path to the procfs or sysfs mount point */
 errno_t
-UMC_init(char * procmountname)
+UMC_init(char * mountname)
 {
     /* Set up "current" for this initial thread --
      * Even though this isn't necessarily a (simulated) "kernel" thread (e.g. iscsi-scstd
@@ -42,8 +43,8 @@ UMC_init(char * procmountname)
 
     UMC_irqthread = irqthread_run("UMC_irqthread");
 
-    errno_t err = pde_fuse_start(procmountname);
-    expect_noerr(err, "pde_fuse_start");
+    errno_t err = UMC_fuse_start(mountname);
+    expect_noerr(err, "UMC_fuse_start");
 
     UMC_workq = create_workqueue("UMC_workq");
 
@@ -56,12 +57,12 @@ UMC_exit(void)
     assert(current);
     errno_t err;
 
-    err = pde_fuse_stop();
+    err = UMC_fuse_stop();
     if (err == -EINVAL) { /* XXX Ignore for the SIGINT hack */}
-    else expect_noerr(err, "pde_fuse_stop");
+    else expect_noerr(err, "UMC_fuse_stop");
 
-    err = pde_fuse_exit();
-    expect_noerr(err, "pde_fuse_exit");
+    err = UMC_fuse_exit();
+    expect_noerr(err, "UMC_fuse_exit");
 
     expect(UMC_irqthread->SYS != sys_thread_current());
     if (UMC_irqthread->SYS == sys_thread_current()) {
@@ -87,6 +88,11 @@ UMC_kthread_fn(void * v_task)
     struct task_struct * task = v_task;
     UMC_current_set(task);
 
+    pr_debug("Thread %s (%p, %u) starts task->SYS %s (%p) task %s (%p)\n",
+	     sys_thread_name(sys_thread), sys_thread, gettid(),
+	     sys_thread_name(task->SYS), task->SYS,
+	     task->comm, task);
+
     /* Let our creating thread return from kthread_start */
     complete(&task->started);
 
@@ -94,6 +100,8 @@ UMC_kthread_fn(void * v_task)
 	sched_setaffinity(current->pid/*tid*/,
 			  sizeof(current->cpus_allowed), (cpu_set_t *)&current->cpus_allowed);
     }
+
+    wait_for_completion(&task->start_release);
 
 				      /*** Run the kthread logic ***/
     errno_t ret = task->exit_code = task->run_fn(task->run_env);

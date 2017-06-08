@@ -11,7 +11,6 @@ MY_CFLAGS += -fsanitize=undefined
 # MY_CFLAGS += -Og
 # MY_CFLAGS += -O1
 # MY_CFLAGS += -O2
-# MY_CFLAGS += -O3 -fno-strict-aliasing
 # MY_CFLAGS += -O3
 
 # disable most of the memory checks remaining when !DEBUG
@@ -22,11 +21,7 @@ MY_CFLAGS += -fsanitize=undefined
 # MY_CFLAGS += -DNVALGRIND
 
 ### Place to get mtelib.h and sys_service.h (et. al.), if not in /usr/include
-ifndef SYS_SERVICE_INCL
-# This only matters if headers are not in /usr/include: Assumes MTE/trunk and
-# UMC/trunk are under the same directory.  Otherwise pass in SYS_SERVICE_INCL.
 SYS_SERVICE_INCL=../../../MTE/trunk/include
-endif
 
 MY_CFLAGS += -I$(SYS_SERVICE_INCL)
 MTELIB_H := $(SYS_SERVICE_INCL)/mtelib.h
@@ -76,10 +71,11 @@ SHELL=/bin/bash
 
 MY_CFLAGS += -g -fPIC -D_GNU_SOURCE -I. -Ikinclude -Ikinclude/UMC
 
-SRCS_D = usermode_lib.c pde_fuse.c
+SRCS_D = usermode_lib.c UMC_fuse.c
 OBJS_D = $(SRCS_D:.c=.o)
 
-all:	check_kinclude check_include
+all:	check_kinclude check_include cscope
+	$(MAKE) .depend
 	$(MAKE) $(OBJS_D)
 
 check_kinclude:
@@ -104,7 +100,7 @@ ifeq (.depend,$(wildcard .depend))
 endif
 
 .depend:
-	$(CC) -M $(CFLAGS) $(SRCS_D) > $@
+	$(CC) -M $(CFLAGS) $(MY_CFLAGS) $(SRCS_D) > $@
 
 clean:
 	rm -f *.o .depend
@@ -113,7 +109,11 @@ extraclean: clean
 	rm -f *.orig *.rej tags cscope.out
 	rm -rf kinclude
 
-.PHONY:	all include check_include check_kinclude	
+cscope:
+	@cscope -b -c -R
+	@ctags        -R
+
+.PHONY:	all include check_include check_kinclude cscope
 
 #########################################################################
 
@@ -139,7 +139,6 @@ kinclude:
 	@touch kinclude/linux/{seq_file.h,slab.h,spinlock.h,swap.h,syscalls.h,sysfs.h}
 	@touch kinclude/linux/{time.h,timer.h,uaccess.h,uio.h,vermagic.h,version.h}
 	@touch kinclude/linux/{vmalloc.h,wait.h,workqueue.h,writeback.h}
-	@touch kinclude/linux/{err.h,atomic.h,rnetlink.h,string.h}  # ib_srpt
 	@#
 	@mkdir -p kinclude/rdma
 	@touch kinclude/rdma/{ib_verbs.h,ib_cache.h}
@@ -180,7 +179,3 @@ kinclude:
 	@ln -s $(MY_KERNEL)/include/scsi/scsi_eh.h		kinclude/UMC/scsi/
 	@ln -s $(MY_KERNEL)/include/scsi/scsi_proto.h		kinclude/UMC/scsi/
 	@ln -s $(MY_KERNEL)/include/scsi/scsi_common.h		kinclude/UMC/scsi/
-	@#
-	@###
-	@ln -s $(MY_KERNEL)/include/scsi/srp.h			kinclude/UMC/scsi/
-	@ln -s $(MY_KERNEL)/include/rdma/ib_mad.h		kinclude/UMC/rdma/

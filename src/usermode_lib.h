@@ -57,23 +57,23 @@ extern int sysinfo (struct sysinfo *__info);
 
 #include "UMC_kernel.h"	    /* a few random definitions from kernel headers */
 
+#ifdef __x86_64__
+
 #define get_unaligned(p)		(*(p))
 #define put_unaligned(v, p)		(void)memcpy((p), &(v), sizeof(v))
 
-#ifdef __x86_64__
-
- #define cpu_to_be64(x)			__builtin_bswap64(x)
- #define be64_to_cpu(x)			__builtin_bswap64(x)
- #define cpu_to_be32(x)			__builtin_bswap32(x)
- #define be32_to_cpu(x)			__builtin_bswap32(x)
- #define cpu_to_be16(x)			__builtin_bswap16(x)
- #define be16_to_cpu(x)			__builtin_bswap16(x)
- #define cpu_to_le64(x)					 (x)
- #define le64_to_cpu(x)					 (x)
- #define cpu_to_le32(x)					 (x)
- #define le32_to_cpu(x)					 (x)
- #define cpu_to_le16(x)					 (x)
- #define le16_to_cpu(x)					 (x)
+#define cpu_to_be64(x)			__builtin_bswap64(x)
+#define be64_to_cpu(x)			__builtin_bswap64(x)
+#define cpu_to_be32(x)			__builtin_bswap32(x)
+#define be32_to_cpu(x)			__builtin_bswap32(x)
+#define cpu_to_be16(x)			__builtin_bswap16(x)
+#define be16_to_cpu(x)			__builtin_bswap16(x)
+#define cpu_to_le64(x)					 (x)
+#define le64_to_cpu(x)					 (x)
+#define cpu_to_le32(x)					 (x)
+#define le32_to_cpu(x)					 (x)
+#define cpu_to_le16(x)					 (x)
+#define le16_to_cpu(x)					 (x)
 
 #define _DIRTY	__attribute__((__no_sanitize_undefined__))
 
@@ -92,7 +92,7 @@ static inline _DIRTY void put_unaligned_le32(uint32_t v, void * p) { *(uint32_t 
 static inline _DIRTY void put_unaligned_le64(uint64_t v, void * p) { *(uint64_t *)p =			 (v); }
 
 #else
- #warning usermode_lib shim has been compiled on x86 only -- work required for other arch
+#warning usermode_lib shim has been compiled on x86 only -- work required for other arch
 #endif
 
 /* Qualify a pointer so that its target is treated as volatile */
@@ -114,7 +114,9 @@ static inline _DIRTY void put_unaligned_le64(uint64_t v, void * p) { *(uint64_t 
 
 /* Let "kernel backport" code take us back as far as 2.6.24; then fill in from there
 								    (your backport may vary) */
+#ifndef LINUX_VERSION_CODE
 #define LINUX_VERSION_CODE		KERNEL_VERSION(2, 6, 24)
+#endif
 
 /***** Misc *****/
 
@@ -124,14 +126,6 @@ static inline _DIRTY void put_unaligned_le64(uint64_t v, void * p) { *(uint64_t 
 
 /* Compile-time assertion */
 #define BUILD_BUG_ON(cond)		assert_static(!(cond))
-
-/* For stubbing out unused functions, macro arguments, etc */
-#define IGNORED				0
-#define DO_NOTHING(USED...)		do { USED; } while (0)
-#define FATAL(fn)			({ sys_panic("REACHED UNIMPLEMENTED FUNCTION %s", #fn); 0ul; })
-
-/* Avoid compiler warnings for stubbed-out macro arguments */
-#define _USE(x)				({ if (0 && (uintptr_t)(x)==0) {}; 0; })
 
 /* Optimizer hints */
 #define __pure				__attribute__((__pure__))
@@ -177,6 +171,15 @@ extern _PER_THREAD struct task_struct * current;    /* current thread */
 
 extern _PER_THREAD size_t UMC_size_t_JUNK;   /* for avoiding unused-value gcc warnings */
 
+/* For stubbing out unused functions, macro arguments, etc */
+#define IGNORED				0
+#define DO_NOTHING(USED...)		do { USED; } while (0)
+#define FATAL(fn, ret...)		({sys_panic("REACHED UNIMPLEMENTED FUNCTION %s", #fn); \
+					  (UMC_size_t_JUNK=(uintptr_t)IGNORED), ##ret;})
+
+/* Avoid compiler warnings for stubbed-out macro arguments */
+#define _USE(x)				({ if (0 && (uintptr_t)(x)==0) {}; 0; })
+
 #define __CACHE_LINE_BYTES		64  /* close enough */
 #define ____cacheline_aligned		__attribute__((aligned(__CACHE_LINE_BYTES)))
 #define ____cacheline_aligned_in_smp	____cacheline_aligned
@@ -185,7 +188,8 @@ typedef uint64_t __attribute__((aligned(8))) aligned_u64;
 
 #define ilog2(v)    (likely((uint64_t)(v) > 0) ? 63 - __builtin_clzl((uint64_t)(v)) : -1)
 
-#define hash_long(val, ORDER)		( (val) % ( 1ul << (ORDER) ) )
+#define hash_long(val, ORDER)		(     (long)(val) % ( 1ul << (ORDER) ) )
+#define hash_32(val, ORDER)		( (uint32_t)(val) % ( 1ul << (ORDER) ) )
 
 static inline uint64_t
 _ROUNDDOWN(uint64_t const v, uint64_t const q) { return v / q * q; }
@@ -198,8 +202,8 @@ _ROUNDUP(uint64_t const v, uint64_t const q) { return (v + q - 1) / q * q; }
 	    ({ int u_rc = (callret); unlikely(u_rc < 0) ? -errno : u_rc; })
 #define UMC_kernelize64(callret...) \
 	    ({ ssize_t u_rc = (callret); unlikely(u_rc < 0) ? -errno : u_rc; })
-#define PTR_ERR(ptr)			((uintptr_t)(ptr))
-#define ERR_PTR(err)			((void *)(uintptr_t)(err))
+#define PTR_ERR(ptr)			((intptr_t)(ptr))
+#define ERR_PTR(err)			((void *)(intptr_t)(err))
 #define IS_ERR(ptr)			unlikely((unsigned long)(ptr) > (unsigned long)(-4096))
 
 #define	ERESTARTSYS			EINTR
@@ -227,7 +231,7 @@ _ROUNDUP(uint64_t const v, uint64_t const q) { return (v + q - 1) / q * q; }
 #define	strict_strtoull(str, base, var) ((*var) = strtoull((str), NULL, (base)), E_OK)
 
 static inline char *
-strnchr(const char * str, size_t strmax, int match)
+strnchr(string_t str, size_t strmax, int match)
 {
     while (strmax && *str) {
 	if (*str == match) return _unconstify(str);
@@ -253,7 +257,7 @@ extern struct _irqthread * UMC_irqthread;   /* delivers "softirq" callbacks */
 /***** Memory *****/
 
 #ifndef PAGE_SHIFT
-#define PAGE_SHIFT			16U /* need not match real kernel */
+#define PAGE_SHIFT			16U	/* need not match real kernel */
 #endif
 
 #define PAGE_SIZE			(1UL<<PAGE_SHIFT)
@@ -366,15 +370,14 @@ typedef	struct mempool {
 #define kzalloc(size, gfp)		(_USE(gfp), vzalloc(size))
 #define kzalloc_node(size, gfp, nodeid) (_USE(nodeid), kzalloc((size), (gfp)))
 
-
 #define krealloc(oaddr, nsize, gfp)	(_USE(gfp), vrealloc((oaddr), (nsize)))
-#define kfree(ptr) \
-	    do { \
-		if (likely(ptr)) vfree(ptr); \
-		/* else sys_warning("Attempt to kfree(NULL)"); */ \
-	    } while (0)
+static inline void
+kfree(void const * const ptr)
+{
+    if (likely(ptr)) vfree(ptr);
+    // else sys_warning("Attempt to kfree(NULL)");
+}
 
-#define __vmalloc(size, gfp, prot)	kalloc((size), (gfp))
 #define kmalloc(size, gfp)		kalloc((size), (gfp))
 #define kmalloc_track_caller(size, gfp)	kalloc((size), (gfp))
 #define kcalloc(count, size, gfp)	kzalloc((count) * (size), (gfp))
@@ -382,7 +385,8 @@ typedef	struct mempool {
 #define kmemdup(addr, len, gfp)		memcpy(kalloc((len), (gfp)), (addr), (len))
 #define kstrdup(string, gfp)		kmemdup((string), 1+strlen(string), (gfp))
 #define vstrdup(string)			kstrdup((string), IGNORED)
-#define strlcpy(dst, src, size)		(dst[(size)-1] = '\0', strncpy((dst), (src), (size)-1), UMC_size_t_JUNK=strlen(dst))
+#define strlcpy(dst, src, size)		(dst[(size)-1] = '\0', strncpy((dst), (src), (size)-1), \
+						    (UMC_size_t_JUNK=strlen(dst)))
 
 #define copy_from_user(dst, src, len)	(memcpy((dst), (src), (len)), E_OK)
 #define copy_to_user(dst, src, len)	(memcpy((dst), (src), (len)), E_OK)
@@ -513,10 +517,33 @@ find_next_bit(const unsigned long *addr, unsigned long nbits, int startbit)
 
 #define __set_bit(bit, ptr)		(assert_be(bit, BITS_PER_LONG-1), *(ptr) |=  (1ull<<(bit)))
 
+//XXX probably could use improvement
+static inline int __bitmap_parse(string_t buf, unsigned int buflen, int is_user, unsigned long *maskp, int nmaskbits)
+{
+    unsigned long parsed = strtoul(buf, NULL, 16);
+    assert_be(nmaskbits, BITS_PER_LONG);
+
+    if (nmaskbits < BITS_PER_LONG) {
+	if (parsed >= 1ul<<nmaskbits) return -EINVAL;
+    }
+
+    *maskp = parsed;
+    return E_OK;
+}
+
 /***** Formatting and logging *****/
+
+/* string_concat_free() appends suffix string to prefix string, CONSUMING BOTH and returning
+ * the concatination -- either or both strings may be NULL -- if both, NULL is returned.
+ */
+//XXXXXX ADD mem_string_concat_free to the sys_services API
+#define string_concat_free(prefix, suffix) mem_string_concat_free((prefix), (suffix), FL_STR)
+string_t mem_string_concat_free(string_t const prefix, string_t const suffix,
+							sstring_t const caller_id);
 
 #define scnprintf(buf, bufsize, fmtargs...) (snprintf((buf), (bufsize), fmtargs), \
 						      (int)(UMC_size_t_JUNK=strlen(buf)))
+#define vscnprintf(buf, bufsize, fmtargs...) scnprintf((buf), (bufsize), fmtargs)
 
 #define kasprintf(gfp, fmt, args...)	sys_sprintf(fmt, ##args)
 #define kvasprintf(gfp, fmt, va)	sys_vsprintf(fmt, va)
@@ -558,7 +585,7 @@ find_next_bit(const unsigned long *addr, unsigned long nbits, int startbit)
 		_ret; \
 	    })
 
-#define ONCE_OR_TWICE	10  /* up to this many of a warning each thread */
+#define ENOUGH_TIMES	5   /* up to this many of a warning each thread */
 
 #define WARN_ON_ONCE(cond)		WARN_ONCE(cond)
 #define WARN_ONCE(cond, fmtargs...)	_WARN_ONCE((cond), ""fmtargs)
@@ -567,10 +594,10 @@ find_next_bit(const unsigned long *addr, unsigned long nbits, int startbit)
 		uintptr_t _ret = (cond);    /* evaluate cond exactly once */ \
 		if (unlikely(_ret != 0)) { \
 		    static _PER_THREAD int _been_here = 0; \
-		    if (unlikely(_been_here < ONCE_OR_TWICE)) { \
+		    if (unlikely(_been_here < ENOUGH_TIMES)) { \
 			++_been_here; \
 		        printk(KERN_WARNING"[%u/%u] %s %ld/0x%lx "fmt"\n", \
-			       _been_here, ONCE_OR_TWICE, \
+			       _been_here, ENOUGH_TIMES, \
 			       #cond, _ret, _ret, ##args); \
 		    } \
 		} \
@@ -580,6 +607,7 @@ find_next_bit(const unsigned long *addr, unsigned long nbits, int startbit)
 /***** Barriers, Atomics, Locking *****/
 
 #define __barrier()			__sync_synchronize()
+#define barrier()			__barrier()
 #define smp_mb()			__barrier()
 #define smp_rmb()			__barrier()
 #define smp_wmb()			__barrier()
@@ -669,6 +697,8 @@ struct kref { atomic_t refcount; };
 	    do { assert(destructor); \
 		 if (atomic_dec_and_test(&(kref)->refcount)) destructor(kref); \
 	    } while (0)
+
+#define kref_read(kref) (atomic_read(&(kref)->refcount))
 
 /*** spin locks ***/
 
@@ -806,6 +836,7 @@ spin_lock_assert_holding(spinlock_t * const lock)
 #endif
 }
 
+//XXX yuck, these are used on mutex locks too
 #ifdef UMC_LOCK_CHECKS
 #define SPINLOCK_CLAIM(lock)	verify_eq((lock)->owner, NULL); (lock)->owner = sys_thread_current();
 #define SPINLOCK_DISCLAIM(lock)	spin_lock_assert_holding(lock); (lock)->owner = NULL;
@@ -1000,7 +1031,8 @@ typedef struct { unsigned long bits[NR_CPUS/BITS_PER_LONG]; } cpumask_t;
 #define cpumask_clear(cpumask)		memset((cpumask), 0, sizeof(*(cpumask)))
 
 #define cpumask_scnprintf(buf, bufsize, mask)	\
-	    (snprintf((buf), (bufsize), "<0x%016x>", mask.bits[0]), UMC_size_t_JUNK=strlen(buf))
+	    (snprintf((buf), (bufsize), "<0x%016x>", mask.bits[0]), \
+					(UMC_size_t_JUNK=strlen(buf)))
 
 static inline int
 num_online_cpus(void)
@@ -1156,6 +1188,7 @@ typedef struct wait_queue_head {
 
 /* Non-exclusive wakeup WITH timeout, and periodic checks for kthread_should_stop */
 //XXX Limitation: when condition is met, returns 1 instead of the number of ticks remaining
+//XXXXXX check this
 #define wait_event_interruptible_timeout(WAITQ, COND, jdelta) \
 	    ({ \
 		sys_time_t const t_end = sys_time_now() + jiffies_to_sys_time(jdelta); \
@@ -1220,9 +1253,9 @@ struct completion {
     atomic_t		    done;
 };
 
-#define COMPLETION_INIT(name)	(struct completion){ \
-					    .wait = WAIT_QUEUE_HEAD_INIT((name).wait), \
-					    .done = { 0 } }
+#define COMPLETION_INIT(name)	{	.wait = WAIT_QUEUE_HEAD_INIT((name).wait), \
+					.done = { 0 } \
+				}
 
 #define DECLARE_COMPLETION(name)	struct completion name = COMPLETION_INIT(name)
 
@@ -1246,7 +1279,7 @@ struct completion {
 	    } while (0)
 
 #define complete(c) \
-	    do { atomic_inc(&(c)->done);        wake_up(    &(c)->wait); } while (0)
+	    do { atomic_inc(&(c)->done);          wake_up(    &(c)->wait); } while (0)
 #define complete_all(c) \
 	    do { atomic_set(&(c)->done, 1ul<<30); wake_up_all(&(c)->wait); } while (0)
 
@@ -1260,7 +1293,9 @@ struct task_struct {
     errno_t		  (*run_fn)(void *);/* kthread's work function */
     void		  * run_env;	    /* argument to run_fn */
     struct completion	    started;	    /* synchronize thread start */
+    struct completion	    start_release;  /* synchronize thread start */
     struct completion	    stopped;	    /* synchronize thread stop */
+    wait_queue_head_t	  * waitq;	    /* for wake_up_process */
     int			    exit_code;
     bool		    affinity_is_set;
 
@@ -1276,12 +1311,25 @@ struct task_struct {
 
 #define kthread_should_stop()	(current->should_stop)
 
-#define UMC_current_alloc()	((struct task_struct *)vmalloc(sizeof(struct task_struct)))
+static inline int
+signal_pending(struct task_struct * current_arg)
+{
+    sigset_t set;
+    if (current_arg != current) {
+	sys_warning("Thread %s (%d) tried to get signal_pending() on thread %s (%d)",
+		    current->comm, current->pid, current_arg->comm, current_arg->pid);
+	/* Just give him his own signal info I guess XXX */
+    }
+    if (sigpending(&set)) return false;
+    if (sigisemptyset(&set)) return false;
+    return true;
+}
+
+#define UMC_current_alloc()	((struct task_struct *)vzalloc(sizeof(struct task_struct)))
 
 #define UMC_current_init(task, _SYS, _FN, _ENV, _COMM) \
 	    ({ \
 		struct task_struct * __t = (task); \
-		record_zero(__t); \
 		__t->SYS = (_SYS); \
 		__t->run_fn = (_FN); \
 		__t->run_env = (_ENV); \
@@ -1338,6 +1386,28 @@ wait_for_completion_timeout(struct completion * c, uint32_t jdelta)
     return 0;	/* timed out or interrupted by kthread_should_stop() */
 }
 
+/* Wake up a specific task --
+ * Each newly-created task needs a call here to get started.
+ */
+#define wake_up_process(task)	_wake_up_process(task, FL_STR)
+static inline void
+_wake_up_process(struct task_struct * task, string_t whence)
+{
+    wait_queue_head_t * waitq = task->waitq;
+
+    /* Let a newly-created thread get get going */
+    complete(&task->start_release);
+
+    if (waitq) {
+	/* The thread is (or recently was) a waiter on this waitq -- wake it up */
+	wake_up_all(waitq);
+    }
+
+    pr_debug("%s: thread %s (%p, %u) WAKES UP thread %s (%p) task %s (%p)\n",
+	     whence, sys_thread_name(sys_thread), sys_thread, gettid(),
+		      sys_thread_name(task->SYS), task->SYS, task->comm, task);
+}
+
 extern errno_t UMC_kthread_fn(void * v_task);    /* start function for a new kthread */
 
 /* Create and initialize a kthread structure -- the pthread is not started yet */
@@ -1345,11 +1415,9 @@ extern errno_t UMC_kthread_fn(void * v_task);    /* start function for a new kth
 static inline struct task_struct *
 _kthread_create(errno_t (*fn)(void * env), void * env, string_t name)
 {
-    pr_debug("Thread %s (%u) creates kthread %s\n",
-	     sys_thread_name(sys_thread_current()), gettid(), name);
-
     struct task_struct * task = UMC_current_alloc();
     init_completion(&task->started);
+    init_completion(&task->start_release);
     init_completion(&task->stopped);
 
     sys_thread_t thread = sys_thread_alloc(UMC_kthread_fn, task, kstrdup(name, IGNORED));
@@ -1361,20 +1429,23 @@ _kthread_create(errno_t (*fn)(void * env), void * env, string_t name)
     task->SYS->nice = nice(0);
     task->cpus_allowed = current->cpus_allowed;	    //XXX Right?
 
-    return task;
-}
+    pr_debug("Thread %s (%p, %u) creates kthread %s (%p) task %s (%p)\n",
+	     sys_thread_name(sys_thread), sys_thread, gettid(),
+	     sys_thread_name(thread), thread,
+	     task->comm, task);
 
-/* Start a previously-created kthread -- returns after new process is ready for use */
-#define wake_up_process(task)		kthread_start(task)
-static inline errno_t
-kthread_start(struct task_struct * task)
-{
     errno_t const err = sys_thread_start(task->SYS);
-    if (err == E_OK) {
-	/* Wait for new thread to be ready */
-	wait_for_completion(&task->started);
+    if (err != E_OK) {
+	/* Failed to start */
+	sys_thread_free(task->SYS);
+	record_free(task);
+	return ERR_PTR(err);
     }
-    return err;
+
+    /* Wait for new thread to be ready */
+    wait_for_completion(&task->started);
+
+    return task;
 }
 
 /* Create and start a kthread */
@@ -1384,15 +1455,7 @@ _kthread_run(errno_t (*fn)(void * env), void * env, string_t name)
 {
     struct task_struct * task = _kthread_create(fn, env, name);
     assert(task);
-
-    errno_t const err = kthread_start(task);
-    if (err != E_OK) {
-	/* Failed to start */
-	sys_thread_free(task->SYS);
-	record_free(task);
-	return ERR_PTR(err);
-    }
-
+    wake_up_process(task);
     return task;	    /* started OK */
 }
 
@@ -1445,12 +1508,14 @@ kthread_stop(struct task_struct * task)
 
 /* This can be called on behalf of a new task before the pthread has been created */
 #define set_cpus_allowed(task, mask) ( \
-	    task->cpus_allowed = (mask), \
-	    task->affinity_is_set = true, \
+	    (task)->cpus_allowed = (mask), \
+	    (task)->affinity_is_set = true, \
 	    (task)->pid \
-		? UMC_kernelize(sched_setaffinity(task->pid, (int)sizeof(mask), \
-						  (cpu_set_t *)&(task->cpus_allowed))) \
+		? UMC_kernelize(sched_setaffinity((task)->pid, (int)sizeof(mask), \
+						  (cpu_set_t *)&((task)->cpus_allowed))) \
 		: E_OK		     )
+
+#define set_cpus_allowed_ptr(task, maskp) set_cpus_allowed((task), *(maskp))
 
 #define tsk_cpus_allowed(task)		(&(task)->cpus_allowed)
 
@@ -1723,10 +1788,12 @@ struct sock {
     uint16_t sk_family;
     union {
 	struct {
-	    struct in_addr daddr;   /* apparently this is supposed to be the PEER name */
+	    struct in_addr saddr;
+	    struct in_addr daddr;
 	} inet_sk;
 	struct {
-	    /* XXX inet6 unsupported */
+	    struct in6_addr saddr;
+	    struct in6_addr daddr;
 	} inet6_sk;
     };
     int			    sk_state;			    /* e.g. TCP_ESTABLISHED */
@@ -1742,10 +1809,19 @@ struct sock {
 #define inet_sk(sk)			(&(sk)->inet_sk)
 #define inet6_sk(sk)			(&(sk)->inet6_sk)
 
-#define NIPQUAD(daddr)			(0xff&(((daddr).s_addr)    )), \
-					(0xff&(((daddr).s_addr)>> 8)), \
-					(0xff&(((daddr).s_addr)>>16)), \
-					(0xff&(((daddr).s_addr)>>24))
+#define NIPQUAD(addr)			(0xff&(((addr).s_addr)    )), \
+					(0xff&(((addr).s_addr)>> 8)), \
+					(0xff&(((addr).s_addr)>>16)), \
+					(0xff&(((addr).s_addr)>>24))
+
+#define NIP6(addr)			(addr).s6_addr16[0], \
+					(addr).s6_addr16[1], \
+					(addr).s6_addr16[2], \
+					(addr).s6_addr16[3], \
+					(addr).s6_addr16[4], \
+					(addr).s6_addr16[5], \
+					(addr).s6_addr16[6], \
+					(addr).s6_addr16[7]
 
 struct socket_ops {
     void                  (*shutdown)(struct socket *, int);
@@ -1774,7 +1850,8 @@ typedef uint32_t umode_t;
 #define S_IWUGO				(S_IWUSR|S_IWGRP|S_IWOTH)
 
 struct proc_inode {
-    struct proc_dir_entry * pde;
+    struct kobject * kobj;		/* 2.6.26 */
+    struct proc_dir_entry * pde;	/* 2.6.24 */
 };
 
 struct block_device {
@@ -1957,7 +2034,7 @@ fget(unsigned int daemon_fd)
 /***** Files on disk, or block devices *****/
 
 static inline struct file *
-filp_open(const char * name, int flags, umode_t mode)
+filp_open(string_t name, int flags, umode_t mode)
 {
     int fd = open(name, flags, mode);
     if (unlikely(fd < 0)) {
@@ -2061,8 +2138,9 @@ sync_page_range(struct inode * inode, void * mapping, loff_t offset, loff_t nbyt
     return err;
 }
 
-/* seq ops have to do with /proc */
+/***** seq ops for /proc and /sys *****/
 
+/* PROCFS */
 struct file_operations {
     void	  * owner;
     int		 (* open)(struct inode *, struct file *);
@@ -2078,7 +2156,10 @@ struct file_operations {
 
 struct seq_file {
     struct seq_operations const   * op;		/* start, show, next, stop */
-    void			  * private;	/* show sub-function */
+    union {
+	void			  * private;	/* 2.6.24 */
+	void			  * priv;	/* 2.6.26 */
+    };
     string_t			    reply;	/* accumulates seq_printfs */
 };
 
@@ -2089,15 +2170,9 @@ struct seq_operations {
     int 		        (*show)(struct seq_file *, void *);
 };
 
-#define seq_printf(seq, fmtargs...) ((seq)->reply = string_concat_free((seq)->reply, sys_sprintf(""fmtargs)))
-
-/* string_concat_free() appends suffix string to prefix string, CONSUMING BOTH and returning
- * the concatination -- either or both strings may be NULL -- if both, NULL is returned.
- */
-//XXXXXX API? string_concat_free
-#define string_concat_free(prefix, suffix) mem_string_concat_free((prefix), (suffix), FL_STR)
-string_t mem_string_concat_free(string_t const prefix, string_t const suffix,
-							sstring_t const caller_id);
+/* Format into a string and append to seq->reply */
+#define seq_printf(seq, fmtargs...) \
+    ((seq)->reply = string_concat_free((seq)->reply, sys_sprintf(""fmtargs)))
 
 static inline errno_t
 seq_open(struct file * const file, struct seq_operations const * const ops)
@@ -2122,9 +2197,6 @@ static inline errno_t
 single_open(struct file * const file, int (*show)(struct seq_file *, void *), void * data)
 {
     struct seq_operations *op = vzalloc(sizeof(*op));
-    op->start = NULL;
-    op->next = NULL;
-    op->stop = NULL;
     op->show = show;
     errno_t err = seq_open(file, op);
     if (err == E_OK) {
@@ -2192,9 +2264,9 @@ static inline ssize_t
 seq_read(struct file * const file, void * buf, size_t size, loff_t * lofsp)
 {
     struct seq_file * seq = file->private_data;
-    assert(*lofsp >= 0);
+    assert_ge(*lofsp, 0);
 
-    seq_fmt(seq);
+    seq_fmt(seq);   /* generate printable representation */
 
     size_t reply_size = seq->reply ? strlen(seq->reply) : 0;
 
@@ -2216,7 +2288,7 @@ seq_read(struct file * const file, void * buf, size_t size, loff_t * lofsp)
     return reply_size;
 }
 
-/* /proc is simulated by mapping our proc_dir_entry tree to the FUSE filesystem interface */
+/* /proc and/or /sys simulated by mapping our proc_dir_entry tree to the FUSE filesystem API */
 
 /* Internal representation of (simulated) /proc tree */
 struct proc_dir_entry {
@@ -2237,6 +2309,8 @@ struct proc_dir_entry {
 extern struct proc_dir_entry * pde_create(char const *, umode_t, struct proc_dir_entry *,
 					        const struct file_operations *, void *);
 
+extern struct proc_dir_entry * pde_remove(char const * name, struct proc_dir_entry * parent);
+
 #define proc_create_data(name, mode, parent, fops, data) \
 	    pde_create((name), (mode), (parent), (fops), (data))
 
@@ -2253,8 +2327,6 @@ extern struct proc_dir_entry * pde_create(char const *, umode_t, struct proc_dir
 #define PROC_DIR_UMODE			(S_IFDIR | 0555)
 #define PROC_FILE_UMODE_R		(S_IFREG | 0444)
 #define PROC_FILE_UMODE_RW		(S_IFREG | 0664)
-
-extern struct proc_dir_entry * pde_remove(char const * name, struct proc_dir_entry * parent);
 
 #define remove_proc_entry(name, parent) \
 	    do { struct proc_dir_entry * pde = pde_remove(name, (parent)); \
@@ -2290,11 +2362,14 @@ struct proc_dir_entry * pde_module_param_remove(char const * name);
 #define module_param(var, type, mode)	module_param_named(var, var, type, (mode))
 
 /* Start/control the FUSE thread */
-extern errno_t pde_fuse_start(char * mountpoint);
-extern errno_t pde_fuse_stop(void);
-extern errno_t pde_fuse_exit(void);
+extern errno_t UMC_fuse_start(char * mountpoint);
+extern errno_t UMC_fuse_stop(void);
+extern errno_t UMC_fuse_exit(void);
 
 ////////////////////////////////////////////////////////////////////////////////
+
+extern uint32_t crc32c_uniq;	//XXX hack makes these unique -- not good for matching
+#define crc32c(x, y, z)			(++crc32c_uniq)
 
 /***** Stub out some definitions unused in usermode builds *****/
 
@@ -2335,6 +2410,7 @@ struct module { char name[MODULE_NAME_LEN]; int arch; };
 #define	GFP_DMA				IGNORED
 #define	GFP_KERNEL			IGNORED
 #define GFP_NOIO			IGNORED
+#define GFP_NOFS			IGNORED
 #define DEFAULT_SEEKS			IGNORED
 #define KERNEL_DS			IGNORED
 #define KM_SOFTIRQ0			IGNORED
@@ -2353,7 +2429,7 @@ typedef void * mm_segment_t;
 enum km_type { FROB };
 struct vm_area_struct;
 
-#define get_user_pages(a,b,c,d,e,f,g,h)	({ FATAL(get_user_pages); IGNORED; })
+#define get_user_pages(a,b,c,d,e,f,g,h)	FATAL(get_user_pages)
 
 struct shrinker {
     void * count_objects;
@@ -2409,15 +2485,26 @@ struct kobj_type {
     ssize_t (*store)(struct kobject *kobj, struct attribute *attr, const char *buf, size_t count);
 };
 
-#define kobject_init(kobj)		DO_NOTHING()
+#define _kobject_init(kobj, type)	    do {kref_init(&(kobj)->kref); \
+						(kobj)->name = NULL; \
+						(kobj)->ktype = (type); \
+						(kobj)->parent = NULL; \
+					    } while (0)
+
+/* Caller should clear the kobject to zero before calling kobject_init() */
+/* type argument was added to kobject_init() in 2.6.25 */
+#define kobject_init(kobj, type...)	    _kobject_init((kobj), type+0)
+
 #define kobject_put(kobj)		DO_NOTHING()
 
-struct device { struct device * parent; struct kobject *kobj; };
+struct device { struct kobject kobj; };
 
 struct class_device;
 struct class_interface {
-    int (*add)(struct class_device *cdev, struct class_interface *intf);
-    void (*remove)(struct class_device *cdev, struct class_interface *intf);
+    int (*add)(struct class_device *cdev, struct class_interface *intf);	// <  2.6.26
+    void (*remove)(struct class_device *cdev, struct class_interface *intf);	// <  2.6.26
+    int (*add_dev)(struct device *cdev, struct class_interface *intf);		// >= 2.6.26
+    void (*remove_dev)(struct device *cdev, struct class_interface *intf);	// >= 2.6.26
 };
 
 #define kfree_rcu()			FATAL(kfree_rcu)
@@ -2428,13 +2515,13 @@ struct class_interface {
 #define scsi_unregister_interface(interface)	DO_NOTHING()
 
 struct nameidata;
-struct dentry;
 
 #define bdev_get_queue(x)		NULL
 
 enum dma_data_direction { DMA_NONE, DMA_FROM_DEVICE, DMA_TO_DEVICE, DMA_BIDIRECTIONAL };
 typedef struct { } dma_addr_t;
 typedef int sector_t;
+#define get_io_context(gfp, x)		IGNORED
 #define put_io_context(c)		DO_NOTHING()
 
 struct tasklet_struct { };
@@ -2445,17 +2532,16 @@ struct tasklet_struct { };
 #define preempt_disable()		DO_NOTHING()
 #define preempt_enable()		DO_NOTHING()
 
-extern uint32_t crc32c_uniq;	//XXX hack makes these unique -- no good for matching
-#define crc32c(x, y, z)			(++crc32c_uniq)
-
-/////////////////////////////////
-
-struct bio;
-typedef void (bio_end_io_t) (struct bio *, int);
+#define is_vmalloc_addr(addr)		false
+#define vmalloc_to_page(addr)		virt_to_page(addr)
+#define offset_in_page(addr)		virt_to_page_ofs(addr)
 
 struct request_queue {
     void (*unplug_fn)(void *);
 };
+
+struct bio;
+typedef void (bio_end_io_t) (struct bio *, int);
 
 struct bio_vec {
         struct page     *bv_page;
@@ -2497,10 +2583,6 @@ struct bio {
 #define REQ_FUA				IGNORED
 
 #define bio_get_nr_vecs(bdev)		BIO_MAX_PAGES
-
-#define is_vmalloc_addr(addr)		false
-#define vmalloc_to_page(addr)		virt_to_page(addr)		
-#define offset_in_page(addr)		virt_to_page_ofs(addr)			
 
 #define bio_flagged(bio, flag)		true //XXX BIO_UPTODATE
 
