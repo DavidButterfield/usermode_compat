@@ -14,7 +14,7 @@
 #include <sys/types.h>
 #include <inttypes.h>
 #include <stdint.h>
-#include <sys/syscall.h>
+#include <stdbool.h>
 #include <unistd.h>
 #include <errno.h>
 #include <stdlib.h>
@@ -26,6 +26,7 @@
 #include <ctype.h>
 #include <limits.h>
 #include <fcntl.h>
+#include <sys/syscall.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <sys/resource.h>
