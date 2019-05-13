@@ -21,7 +21,7 @@ MY_CFLAGS += -fsanitize=undefined
 # MY_CFLAGS += -DNVALGRIND
 
 ### Place to get mtelib.h and sys_service.h (et. al.), if not in /usr/include
-SYS_SERVICE_INCL=../../../MTE/trunk/include
+SYS_SERVICE_INCL=../../MTE/include
 
 MY_CFLAGS += -I$(SYS_SERVICE_INCL)
 MTELIB_H := $(SYS_SERVICE_INCL)/mtelib.h
@@ -69,7 +69,7 @@ MY_CFLAGS += $(WFLAGS_WARN) $(WFLAGS_INHIBIT)
 ################################################################################
 SHELL=/bin/bash
 
-MY_CFLAGS += -g -fPIC -D_GNU_SOURCE -I. -Ikinclude -Ikinclude/UMC
+MY_CFLAGS += -g -fPIC -fno-omit-frame-pointer -D_GNU_SOURCE -I. -Ikinclude -Ikinclude/UMC
 
 SRCS_D = usermode_lib.c UMC_fuse.c
 OBJS_D = $(SRCS_D:.c=.o)
@@ -77,6 +77,10 @@ OBJS_D = $(SRCS_D:.c=.o)
 all:	check_kinclude check_include cscope
 	$(MAKE) .depend
 	$(MAKE) $(OBJS_D)
+
+drbd:	all
+
+scst:	all
 
 check_kinclude:
 	@if [[ ! -d kinclude ]] ; then $(MAKE) kinclude; fi
@@ -113,21 +117,135 @@ cscope:
 	@cscope -b -c -R
 	@ctags        -R
 
-.PHONY:	all include check_include check_kinclude cscope
+.PHONY:	all include check_include check_kinclude cscope kinclude
 
 #########################################################################
 
 ### Create the include directories we use to spoof kernel headers in various ways --
 ### kinclude tree contains empty files, and symlinks to real kernel header files in UMC subdirectory
 
-kinclude:
-	### Create empty files so #includes of them successfully do nothing
-	### These get #included by the SCST kernel files when compiling for SCST_USERMODE
-	@mkdir -p kinclude/{asm,asm-generic,net,scsi}
-	@touch kinclude/asm/{atomic.h,checksum.h,div64.h,io.h,kmap_types.h,uaccess.h,unaligned.h}
-	@touch kinclude/asm-generic/{iomap.h,kmap_types.h,memory_model.h}
-	@touch kinclude/net/{sock.h,tcp.h,tcp_states.h}
-	@touch kinclude/scsi/{scsi_device.h,scsi_driver.h,scsi_host.h}
+kinclude:   kinclude_links kinclude_empty kinclude_empty2
+
+kinclude_links:
+	@### Create links to a few kernel headers we really do want to include.
+	@### Give them /UMC/ names so they are only included explicitly;
+	@### without the UMC name the dummy empty header file gets included.
+	@mkdir -p kinclude/UMC/linux/unaligned
+	@mkdir -p kinclude/UMC/linux/byteorder
+	@mkdir -p kinclude/UMC/uapi/linux/byteorder
+	@ln -s $(MY_KERNEL)/include/uapi/linux/byteorder/little_endian.h kinclude/UMC/uapi/linux/byteorder/
+	@ln -s $(MY_KERNEL)/include/linux/unaligned/generic.h	kinclude/UMC/linux/unaligned/
+	@ln -s $(MY_KERNEL)/include/linux/byteorder/generic.h	kinclude/UMC/linux/byteorder/
+	@ln -s $(MY_KERNEL)/include/linux/unaligned/access_ok.h	kinclude/UMC/linux/unaligned/
+	@ln -s $(MY_KERNEL)/include/linux/export.h		kinclude/UMC/linux/
+	@ln -s $(MY_KERNEL)/include/linux/list.h		kinclude/UMC/linux/
+	@#
+	@ln -s $(MY_KERNEL)/include/linux/blk_types.h		kinclude/UMC/linux/
+	@ln -s $(MY_KERNEL)/include/linux/typecheck.h		kinclude/UMC/linux/
+	@ln -s $(MY_KERNEL)/include/linux/rbtree.h		kinclude/UMC/linux/
+	@ln -s $(MY_KERNEL)/include/linux/genetlink.h		kinclude/UMC/linux/
+	@#
+	@mkdir -p kinclude/UMC/scsi
+	@ln -s $(MY_KERNEL)/include/scsi/scsi.h			kinclude/UMC/scsi/
+	@ln -s $(MY_KERNEL)/include/scsi/scsi_cmnd.h		kinclude/UMC/scsi/
+	@ln -s $(MY_KERNEL)/include/scsi/scsi_eh.h		kinclude/UMC/scsi/
+	@ln -s $(MY_KERNEL)/include/scsi/scsi_proto.h		kinclude/UMC/scsi/
+	@ln -s $(MY_KERNEL)/include/scsi/scsi_common.h		kinclude/UMC/scsi/
+	@ln -s $(MY_KERNEL)/include/scsi/scsi_request.h		kinclude/UMC/scsi/
+	@#
+	@mkdir -p kinclude/UMC/arch/x86/include/asm
+	@ln -s $(MY_KERNEL)/arch/x86/include/asm/cmpxchg.h	kinclude/UMC/arch/x86/include/asm/
+	@#
+	@mkdir -p kinclude/UMC/uapi/linux
+	@ln -s $(MY_KERNEL)/include/uapi/linux/genetlink.h	kinclude/UMC/uapi/linux/
+	@#
+	@mkdir -p kinclude/UMC/net
+	@ln -s $(MY_KERNEL)/include/net/genetlink.h		kinclude/UMC/net
+
+kinclude_empty2:
+	@### Create empty files so #includes of them successfully do nothing
+	@### These get #included by the SCST kernel files when compiling for SCST_USERMODE
+	@### These correspond to the /UMC/ names linked above
+	@mkdir -p kinclude/linux/unaligned
+	@mkdir -p kinclude/linux/byteorder
+	@mkdir -p kinclude/uapi/linux/byteorder
+	@touch kinclude/uapi/linux/byteorder/little_endian.h
+	@touch kinclude/linux/byteorder/generic.h
+	@touch kinclude/linux/export.h
+	@touch kinclude/linux/list.h
+	@touch kinclude/linux/unaligned/access_ok.h
+	@touch kinclude/linux/unaligned/generic.h
+	@#
+	@touch kinclude/linux/blk_types.h
+	@touch kinclude/linux/typecheck.h
+	@touch kinclude/linux/rbtree.h
+	@touch kinclude/linux/genetlink.h
+	@#
+	@mkdir -p kinclude/scsi
+	@touch kinclude/scsi/scsi_cmnd.h
+	@touch kinclude/scsi/scsi_common.h
+	@touch kinclude/scsi/scsi_eh.h
+	@touch kinclude/scsi/scsi.h
+	@touch kinclude/scsi/scsi_proto.h
+	@touch kinclude/scsi/scsi_request.h
+	@#
+	@mkdir -p kinclude/arch/x86/include/asm
+	@touch kinclude/arch/x86/include/asm/cmpxchg.h
+	@#
+	@mkdir -p kinclude/uapi/linux
+	@touch kinclude/uapi/linux/genetlink.h
+	@#
+	@mkdir -p kinclude/net
+	@touch kinclude/net/genetlink.h
+
+kinclude_empty:
+	@### Create empty files so #includes of them successfully do nothing
+	@### These get #included by the SCST kernel files when compiling for SCST_USERMODE
+	@mkdir -p kinclude/asm
+	@touch kinclude/asm/alternative.h
+	@touch kinclude/asm/atomic.h
+	@touch kinclude/asm/checksum.h
+	@touch kinclude/asm/cmpxchg_64.h
+	@touch kinclude/asm/cpufeatures.h
+	@touch kinclude/asm/div64.h
+	@touch kinclude/asm/io.h
+	@touch kinclude/asm/kmap_types.h
+	@touch kinclude/asm/param.h
+	@touch kinclude/asm/semaphore.h
+	@touch kinclude/asm/system.h
+	@touch kinclude/asm/uaccess.h
+	@touch kinclude/asm/unaligned.h
+	@#
+	@mkdir -p kinclude/asm-generic
+	@touch kinclude/asm-generic/iomap.h
+	@touch kinclude/asm-generic/kmap_types.h
+	@touch kinclude/asm-generic/memory_model.h
+	@#
+	@mkdir -p kinclude/uapi/linux/sched/
+	@touch kinclude/uapi/linux/sched/types.h
+	@#
+	@mkdir -p kinclude/linux/sched/
+	@touch kinclude/linux/sched/signal.h
+	@#
+	@mkdir -p kinclude/net
+	@touch kinclude/net/ipv6.h
+	@touch kinclude/net/netlink.h
+	@touch kinclude/net/net_namespace.h
+	@touch kinclude/net/sock.h
+	@touch kinclude/net/tcp.h
+	@touch kinclude/net/tcp_states.h
+	@#
+	@mkdir -p kinclude/crypto
+	@touch kinclude/crypto/hash.h
+	@#
+	@mkdir -p kinclude/scsi
+	@touch kinclude/scsi/scsi_device.h
+	@touch kinclude/scsi/scsi_driver.h
+	@touch kinclude/scsi/scsi_host.h
+	@#
+	@mkdir -p kinclude/rdma
+	@touch kinclude/rdma/ib_verbs.h
+	@touch kinclude/rdma/ib_cache.h
 	@#
 	@mkdir -p kinclude/linux
 	@touch kinclude/linux/{autoconf.h,bio.h,blkdev.h,bug.h,compiler.h,cpumask.h}
@@ -140,42 +258,57 @@ kinclude:
 	@touch kinclude/linux/{time.h,timer.h,uaccess.h,uio.h,vermagic.h,version.h}
 	@touch kinclude/linux/{vmalloc.h,wait.h,workqueue.h,writeback.h}
 	@#
-	@mkdir -p kinclude/rdma
-	@touch kinclude/rdma/{ib_verbs.h,ib_cache.h}
+	@touch kinclude/linux/atomic.h
+	@touch kinclude/linux/backing-dev.h
+	@touch kinclude/linux/bitops.h
+	@touch kinclude/linux/blk-mq.h
+	@touch kinclude/linux/blkpg.h
+	@touch kinclude/linux/completion.h
+	@touch kinclude/linux/crypto.h
+	@touch kinclude/linux/dcache.h
+	@touch kinclude/linux/debugfs.h
+	@touch kinclude/linux/device.h
+	@touch kinclude/linux/dynamic_debug.h
+	@touch kinclude/linux/err.h
+	@touch kinclude/linux/file.h
+	@touch kinclude/linux/fs.h
+	@touch kinclude/linux/genhd.h
+	@touch kinclude/linux/genl_magic_func.h
+	@touch kinclude/linux/highmem.h
+	@touch kinclude/linux/idr.h
+	@touch kinclude/linux/jiffies.h
+	@touch kinclude/linux/kref.h
+	@touch kinclude/linux/lru_cache.h
+	@touch kinclude/linux/major.h
+	@touch kinclude/linux/memcontrol.h
+	@touch kinclude/linux/mm_inline.h
+	@touch kinclude/linux/net.h
+	@touch kinclude/linux/netlink.h
+	@touch kinclude/linux/notifier.h
+	@touch kinclude/linux/once.h
+	@touch kinclude/linux/prefetch.h
+	@touch kinclude/linux/random.h
+	@touch kinclude/linux/ratelimit.h
+	@touch kinclude/linux/rcupdate.h
+	@touch kinclude/linux/reboot.h
+	@touch kinclude/linux/sched.h
+	@touch kinclude/linux/security.h
+	@touch kinclude/linux/stat.h
+	@touch kinclude/linux/string.h
+	@touch kinclude/linux/stringify.h
+	@touch kinclude/linux/tcp.h
 	@#
-	@### These correspond to the /UMC/ names linked below
-	@mkdir -p kinclude/linux/{unaligned,byteorder}
-	@touch kinclude/linux/byteorder/generic.h
-	@touch kinclude/linux/unaligned/access_ok.h
-	@touch kinclude/linux/unaligned/generic.h
-	@touch kinclude/linux/export.h
-	@touch kinclude/linux/list.h
-	@#
-	@mkdir -p kinclude/scsi
-	@touch kinclude/scsi/scsi_proto.h
-	@touch kinclude/scsi/scsi_common.h
-	@touch kinclude/scsi/scsi.h
-	@touch kinclude/scsi/scsi_cmnd.h
-	@touch kinclude/scsi/scsi_eh.h
-	@#
-	@### Create links to a few kernel headers we really do want to include.
-	@### Give them /UMC/ names so they are only included explicitly;
-	@### without the UMC name the dummy empty header file gets included.
-	@###
-	@### These are only included from usermode_lib.h
-	@mkdir -p kinclude/UMC/linux/{unaligned,byteorder}
-	@mkdir -p kinclude/UMC/uapi/linux/byteorder
-	@ln -s $(MY_KERNEL)/include/uapi/linux/byteorder/little_endian.h kinclude/UMC/uapi/linux/byteorder/
-	@ln -s $(MY_KERNEL)/include/linux/byteorder/generic.h	kinclude/UMC/linux/byteorder/
-	@ln -s $(MY_KERNEL)/include/linux/unaligned/access_ok.h	kinclude/UMC/linux/unaligned/
-	@ln -s $(MY_KERNEL)/include/linux/unaligned/generic.h	kinclude/UMC/linux/unaligned/
-	@ln -s $(MY_KERNEL)/include/linux/export.h		kinclude/UMC/linux/
-	@ln -s $(MY_KERNEL)/include/linux/list.h			kinclude/UMC/linux/
-	@#
-	@### These are only included from scst_compat.h
-	@mkdir -p kinclude/UMC/scsi
-	@ln -s $(MY_KERNEL)/include/scsi/scsi.h			kinclude/UMC/scsi/
-	@ln -s $(MY_KERNEL)/include/scsi/scsi_cmnd.h		kinclude/UMC/scsi/
-	@ln -s $(MY_KERNEL)/include/scsi/scsi_eh.h		kinclude/UMC/scsi/
-	@ln -s $(MY_KERNEL)/include/scsi/scsi_proto.h		kinclude/UMC/scsi/
-	@ln -s $(MY_KERNEL)/include/scsi/scsi_common.h		kinclude/UMC/scsi/
+	@touch kinclude/kref_debug.h
+
+do_not_touch:
+	@# XXX We currently seem to get these from /usr/include
+	@# XXX This isn't right!
+	@#touch kinclude/asm/byteorder.h
+	@#touch kinclude/asm/types.h
+	@#touch kinclude/linux/errno.h
+	@#touch kinclude/linux/in.h
+	@#touch kinclude/linux/pkt_sched.h
+	@#touch kinclude/linux/socket.h
+	@#touch kinclude/linux/swab.h
+	@#touch kinclude/linux/types.h
+	@#touch kinclude/linux/unistd.h

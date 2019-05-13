@@ -1,6 +1,8 @@
 /* UMC_kernel.h
  * Some random things lifted from real Linux kernel header files.
  */
+#include <inttypes.h>
+
 #ifndef UMC_KERNEL_H
 #define UMC_KERNEL_H
 
@@ -10,16 +12,33 @@
 
 #define KERNEL_VERSION(a,b,c)		(((a) << 16) + ((b) << 8) + (c))
 
+#define BITS_PER_BYTE			8
 #define BITS_PER_LONG			__BITS_PER_LONG
-#define BYTES_PER_LONG			(BITS_PER_LONG/8)
+#define BYTES_PER_LONG			(BITS_PER_LONG/BITS_PER_BYTE)
 
-#define SLAB_HWCACHE_ALIGN      0x00002000UL    /* Align objs on cache lines */
+#define MINORBITS			20
+#define MINORMASK			((1U << MINORBITS) - 1)
+#define MKDEV(major, minor)		(((major) << MINORBITS) | (minor))
+
+//#define TCP_ESTABLISHED			1
+#define SOL_TCP				6
 
 typedef uint8_t				u8;
 typedef uint16_t			u16;
 typedef uint32_t			u32;
 typedef uint64_t			u64;
+typedef int8_t				s8;
+typedef int16_t				s16;
 typedef int32_t				s32;
+typedef int64_t				s64;
+
+#define do_div(n,base) ({			\
+	uint32_t __base = (base);		\
+	uint32_t __rem;				\
+	__rem = ((uint64_t)(n)) % __base;	\
+	(n) = ((uint64_t)(n)) / __base;		\
+	__rem;					\
+})
 
 /* min()/max() that do strict type-checking. Lifted from the kernel. */
 #define min(x, y) ({				\
@@ -44,22 +63,5 @@ typedef int32_t				s32;
 	type __max1 = (x);			\
 	type __max2 = (y);			\
 	__max1 > __max2 ? __max1: __max2; })
-
-#define do_div(n,base) ({					\
-        uint32_t __base = (base);                               \
-        uint32_t __rem;                                         \
-        __rem = ((uint64_t)(n)) % __base;                       \
-        (n) = ((uint64_t)(n)) / __base;                         \
-        __rem;                                                  \
-})
-
-/* Some unused kernel types wanted by parts of kernel's list.h we don't use */
-struct rq_disk { void * private_data; };
-struct request { struct request * next_rq; void * special; struct rq_disk * rq_disk; };
-struct list_head { struct list_head *next, *prev; };
-struct hlist_head { struct hlist_node *first; };
-struct hlist_node { struct hlist_node *next, **pprev; };
-#define LIST_POISON1  ((void *) 0x00100100 )
-#define LIST_POISON2  ((void *) 0x00200200 )
 
 #endif /* UMC_KERNEL_H */

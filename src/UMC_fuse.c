@@ -126,7 +126,10 @@ pde_node_remove(char const * name, struct proc_dir_entry * parent)
 static ssize_t
 pde_node_fmt(struct proc_dir_entry * pde, char * buf, size_t size, off_t * lofsp)
 {
-    struct file * const file = _file_alloc(-1, I_TYPE_PROC, pde->mode, 0, 0);
+    struct file * file = _file_alloc();
+    file->inode = alloc_inode(0);
+    init_inode(file->inode, I_TYPE_PROC, pde->mode, 0, 0);
+    file->inode->UMC_fd = -1;
     PROC_I(file->inode)->pde = pde;
 
     errno_t err;
@@ -301,6 +304,8 @@ static ssize_t
 pde_write(struct proc_dir_entry * pde_root, char const * path,
 				    char const * buf, size_t size, off_t ofs)
 {
+    int err;
+
     // trace("%s size=%"PRIu64" ofs=%u", path, size, (uint32_t)ofs);
     trace("WRITE %s '%.*s'", path, (int)size, buf);
 
@@ -311,10 +316,11 @@ pde_write(struct proc_dir_entry * pde_root, char const * path,
     /* These nodes aren't supposed to be writable, but superuser can still get here */
     if (!pde->proc_fops->write) return -EPERM;
 
-    struct file * const file = record_alloc(file);
-    file->inode = &file->inode_s;
+    struct file * file = _file_alloc();
+    file->inode = alloc_inode(0);
+    init_inode(file->inode, I_TYPE_PROC, 0666, size, 0);
+    file->inode->UMC_fd = -1;
     PROC_I(file->inode)->pde = pde;
-    int err;
 
     err = pde->proc_fops->open(file->inode, file);
     expect_noerr(err, "pde[%s]->proc_fops->open", pde->name);
