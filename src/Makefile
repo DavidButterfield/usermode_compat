@@ -2,6 +2,8 @@
 # Makefile for usermode compatibility for Linux kernel source code
 # Imports optional SYS_SERVICE_INCL, CFLAGS, MY_KERNEL
 
+MY_KERNEL=/home/dave/git/linux-2.6.32.27
+
 MY_CFLAGS += -DDEBUG
 MY_CFLAGS += -fsanitize=undefined
 # MY_CFLAGS += -DNDEBUG
@@ -71,7 +73,7 @@ SHELL=/bin/bash
 
 MY_CFLAGS += -g -fPIC -fno-omit-frame-pointer -D_GNU_SOURCE -I. -Ikinclude -Ikinclude/UMC
 
-SRCS_D = usermode_lib.c UMC_fuse.c
+SRCS_D = usermode_lib.c UMC_fuse.c UMC_genl.c
 OBJS_D = $(SRCS_D:.c=.o)
 
 all:	check_kinclude check_include cscope
@@ -132,15 +134,11 @@ kinclude_links:
 	@### without the UMC name the dummy empty header file gets included.
 	@mkdir -p kinclude/UMC/linux/unaligned
 	@mkdir -p kinclude/UMC/linux/byteorder
-	@mkdir -p kinclude/UMC/uapi/linux/byteorder
-	@ln -s $(MY_KERNEL)/include/uapi/linux/byteorder/little_endian.h kinclude/UMC/uapi/linux/byteorder/
 	@ln -s $(MY_KERNEL)/include/linux/unaligned/generic.h	kinclude/UMC/linux/unaligned/
 	@ln -s $(MY_KERNEL)/include/linux/byteorder/generic.h	kinclude/UMC/linux/byteorder/
 	@ln -s $(MY_KERNEL)/include/linux/unaligned/access_ok.h	kinclude/UMC/linux/unaligned/
-	@ln -s $(MY_KERNEL)/include/linux/export.h		kinclude/UMC/linux/
 	@ln -s $(MY_KERNEL)/include/linux/list.h		kinclude/UMC/linux/
 	@#
-	@ln -s $(MY_KERNEL)/include/linux/blk_types.h		kinclude/UMC/linux/
 	@ln -s $(MY_KERNEL)/include/linux/typecheck.h		kinclude/UMC/linux/
 	@ln -s $(MY_KERNEL)/include/linux/rbtree.h		kinclude/UMC/linux/
 	@ln -s $(MY_KERNEL)/include/linux/genetlink.h		kinclude/UMC/linux/
@@ -149,15 +147,9 @@ kinclude_links:
 	@ln -s $(MY_KERNEL)/include/scsi/scsi.h			kinclude/UMC/scsi/
 	@ln -s $(MY_KERNEL)/include/scsi/scsi_cmnd.h		kinclude/UMC/scsi/
 	@ln -s $(MY_KERNEL)/include/scsi/scsi_eh.h		kinclude/UMC/scsi/
-	@ln -s $(MY_KERNEL)/include/scsi/scsi_proto.h		kinclude/UMC/scsi/
-	@ln -s $(MY_KERNEL)/include/scsi/scsi_common.h		kinclude/UMC/scsi/
-	@ln -s $(MY_KERNEL)/include/scsi/scsi_request.h		kinclude/UMC/scsi/
 	@#
 	@mkdir -p kinclude/UMC/arch/x86/include/asm
 	@ln -s $(MY_KERNEL)/arch/x86/include/asm/cmpxchg.h	kinclude/UMC/arch/x86/include/asm/
-	@#
-	@mkdir -p kinclude/UMC/uapi/linux
-	@ln -s $(MY_KERNEL)/include/uapi/linux/genetlink.h	kinclude/UMC/uapi/linux/
 	@#
 	@mkdir -p kinclude/UMC/net
 	@ln -s $(MY_KERNEL)/include/net/genetlink.h		kinclude/UMC/net
@@ -168,32 +160,23 @@ kinclude_empty2:
 	@### These correspond to the /UMC/ names linked above
 	@mkdir -p kinclude/linux/unaligned
 	@mkdir -p kinclude/linux/byteorder
-	@mkdir -p kinclude/uapi/linux/byteorder
-	@touch kinclude/uapi/linux/byteorder/little_endian.h
 	@touch kinclude/linux/byteorder/generic.h
-	@touch kinclude/linux/export.h
 	@touch kinclude/linux/list.h
 	@touch kinclude/linux/unaligned/access_ok.h
 	@touch kinclude/linux/unaligned/generic.h
 	@#
-	@touch kinclude/linux/blk_types.h
 	@touch kinclude/linux/typecheck.h
 	@touch kinclude/linux/rbtree.h
 	@touch kinclude/linux/genetlink.h
 	@#
 	@mkdir -p kinclude/scsi
 	@touch kinclude/scsi/scsi_cmnd.h
-	@touch kinclude/scsi/scsi_common.h
 	@touch kinclude/scsi/scsi_eh.h
 	@touch kinclude/scsi/scsi.h
-	@touch kinclude/scsi/scsi_proto.h
-	@touch kinclude/scsi/scsi_request.h
 	@#
 	@mkdir -p kinclude/arch/x86/include/asm
 	@touch kinclude/arch/x86/include/asm/cmpxchg.h
 	@#
-	@mkdir -p kinclude/uapi/linux
-	@touch kinclude/uapi/linux/genetlink.h
 	@#
 	@mkdir -p kinclude/net
 	@touch kinclude/net/genetlink.h
