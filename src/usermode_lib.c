@@ -51,19 +51,57 @@ struct page zero_page;
 static void
 on_netlink_error(struct sock * sk)
 {
-    sys_notice("error on netlink socket");
+    sys_notice("state change on netlink");
 }
+
+#define NETLINK_BUFSIZE 8192
 
 static void
 on_netlink_recv(struct sock * sk, int len)
 {
+    assert_eq(sk->netlink_rcv, genl_rcv);
     expect_eq(len, 0);
-    char buf[8192];
-    errno = 0;
-    ssize_t rc = recv(sk->fd, buf, sizeof(buf), MSG_DONTWAIT);
-    sys_notice("received netlink message, rc=%ld, errno=%d", rc, errno);
-    if (rc > 0)
-	mem_dump((uintptr_t)buf, (uintptr_t)buf+rc, __func__);
+
+    struct sk_buff * skb = alloc_skb(NETLINK_BUFSIZE, IGNORED);
+    skb->sk = sk;
+
+    ssize_t rc = recv(sk->fd, skb->data, NETLINK_BUFSIZE, MSG_DONTWAIT);
+    if (rc <= 0) {
+	if (rc == 0)
+	    sys_notice("EOF on netlink fd=%d", sk->fd);
+	else {
+	    if (errno == EAGAIN) {
+		sys_notice("EAGAIN on netlink fd=%d", sk->fd);
+		return;
+	    }
+	    perror("netlink recv");
+	    sys_warning("error on netlink fd=%d", sk->fd);
+	}
+	struct socket * sock = container_of(sk, struct socket, sk_s);   /* annoying */
+	kfree_skb(skb);
+	init_net.genl_sock = NULL;  //XXXXXX
+
+	sock_release(sock);
+	return;
+    }
+
+    skb->len = rc;
+    skb->tail += rc;
+    struct netlink_skb_parms * parms = (void *)skb->cb;
+    parms->sk = sk;
+
+    struct netlink_callback cb = {
+	.skb = skb,
+	.nlh = (void *)skb->head,
+    };
+
+    sk->cb = &cb;
+
+    sys_notice("calling netlink handler skb=%p buf=%p len=%u", skb, skb->head, skb->len);
+
+    mutex_lock(sk->cb_mutex);
+    sk->netlink_rcv(skb);	    /* XXX hopefully synchronous */
+    mutex_unlock(sk->cb_mutex);
 }
 
 static void
@@ -71,19 +109,42 @@ on_netlink_incoming(struct sock * sk)
 {
     struct socket * sock = container_of(sk, struct socket, sk_s);   /* annoying */
     struct socket * newsock;
+    assert_eq(sk, UMC_kernel_netlink_listener_sock->sk);
     sys_notice("received incoming netlink connection");
 
-    /* Intercept receive events */
-    sock->sk->sk_user_data = sk;
-    sock->sk->sk_data_ready = on_netlink_recv;
-    sock->sk->sk_state_change = on_netlink_error;
-
-    error_t err = UMC_sock_accept(sock, &newsock, 0);
+    error_t err = UMC_sock_accept(sock, &newsock, 0/*flags for newsock*/);
     if (err) {
-	sys_warning("dropped incoming netlink connection");
-    } else {
-	sys_notice("accepted incoming netlink connection");
+	if (err == -EAGAIN)
+	    sys_notice("EAGAIN netlink listener");
+	else
+	    sys_warning("dropped incoming netlink connection");
+	return;
     }
+
+    //XXXXXX
+    if (init_net.genl_sock) {
+	sys_warning("BUSY: ignore incoming connection");
+	return;
+    }
+
+    sys_notice("accepted incoming netlink connection");
+
+    struct sock * nsk = newsock->sk;
+    nsk->sk = nsk;	/* self-reference because our nsk fields live in sk */
+    nsk->netlink_rcv = genl_rcv;
+    nsk->cb_mutex = &nsk->cb_def_mutex;
+    mutex_init(nsk->cb_mutex);
+
+    /* Intercept receive events */
+    nsk->sk_user_data = nsk;
+    nsk->sk_data_ready = on_netlink_recv;
+    nsk->sk_state_change = on_netlink_error;
+
+    //XXXXXX nasty!  For now only handles one connection at a time
+    init_net.genl_sock = nsk;
+
+    /* In case a receive event occurred before we intercepted them */
+    nsk->sk_data_ready(newsock->sk->sk_user_data, 0);
 }
 
 static void
@@ -91,6 +152,8 @@ on_netlink_incoming2(struct sock * sk, int ignored)
 {
     on_netlink_incoming(sk);
 }
+
+extern void UMC_genl_init(void);
 
 static void
 establish_netlink(void)
@@ -100,6 +163,8 @@ establish_netlink(void)
 	return;
     }
 
+    UMC_genl_init();
+
     struct sockaddr_in addr = {
 	.sin_family = AF_INET,
 	// .sin_addr = { htonl(0x7f000001) },	//127.0.0.1
@@ -108,12 +173,17 @@ establish_netlink(void)
 
     int fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) {
-	perror("UMC_init netlink socket: ");
-	sys_warning("UMC_init could not open generic netlink socket");
+	perror("UMC_init netlink: ");
+	sys_warning("UMC_init could not open generic netlink");
+
+    } else if (fcntl(fd, F_SETFL, O_NONBLOCK) < 0) {
+	perror("UMC_init netlink fcntl(O_NONBLOCK): ");
+	sys_warning("UMC_init could not set netlink O_NONBLOCK");
+	close(fd);
 
     } else if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
 	perror("UMC_init netlink bind: ");
-	sys_warning("UMC_init could not bind generic netlink socket");
+	sys_warning("UMC_init could not bind generic netlink");
 	close(fd);
 
     } else if (listen(fd, 16) < 0) {
@@ -123,8 +193,8 @@ establish_netlink(void)
 
     } else {
 	sys_notice("starting netlink listener");
-	/* fget() starts the connection handler thread for the listener */
-	struct file * file = fget(fd);
+	/* _fget() starts the connection handler thread for the listener */
+	struct file * file = _fget(fd);
 	if (!file) {
 	    sys_warning("could not allocate file for netlink listener");
 	    close(fd);
@@ -137,6 +207,12 @@ establish_netlink(void)
 	UMC_kernel_netlink_listener_sock->sk->sk_user_data = UMC_kernel_netlink_listener_sock->sk;
 	UMC_kernel_netlink_listener_sock->sk->sk_state_change = on_netlink_incoming;
 	UMC_kernel_netlink_listener_sock->sk->sk_data_ready = on_netlink_incoming2;
+
+#if 0
+	/* In case a connection event occurred before we intercepted it */
+	UMC_kernel_netlink_listener_sock->sk->sk_state_change(
+		UMC_kernel_netlink_listener_sock->sk->sk_user_data);
+#endif
     }
 }
 
@@ -164,10 +240,11 @@ UMC_init(char * mountname)
 	nr_cpu_ids = CPU_COUNT(&mask);
     }
 
-    UMC_irqthread = irqthread_run("UMC_irqthread");
-
+    /* fuse forks, so do it before opening file descriptors */
     errno_t err = UMC_fuse_start(mountname);
     expect_noerr(err, "UMC_fuse_start");
+
+    UMC_irqthread = irqthread_run("UMC_irqthread");
 
     UMC_workq = create_workqueue("UMC_workq");
 
@@ -396,7 +473,7 @@ autoremove_wake_function(struct wait_queue_entry *wq_entry, unsigned mode, int s
 ssize_t
 sock_no_sendpage(struct socket *sock, struct page *page, int offset, size_t size, int flags)
 {
-    return UMC_kernelize64(send((sock)->sk->fd, page_address(page) + (offset), (size), (flags)));
+    return UMC_kernelize64(send(sock->sk->fd, page_address(page) + offset, size, flags));
 }
 
 errno_t
@@ -436,16 +513,20 @@ UMC_sock_accept(struct socket * sock, struct socket ** newsock, int flags)
 	return fd;  /* -errno */
     }
 
-    /* fget() starts the receive handler thread for this socket */
-    struct file * file = fget(fd);
+    /* _fget() starts the receive handler thread for this socket */
+    struct file * file = _fget(fd);
     if (!file) {
 	close(fd);
 	return -ENOMEM;
     }
 
-    sys_notice("Accepted incoming socket connection");	//XXX
+    sys_notice("Accepted incoming socket connection listenfd=%d newfd=%d",
+		sock->sk->fd, fd);	//XXX
 
     *newsock = SOCKET_I(file->inode);
+
+    assert_eq((*newsock)->sk->fd, fd);
+
     return E_OK;
 }
 
@@ -520,28 +601,6 @@ UMC_sock_recv_event(void * env, uintptr_t events, errno_t err)
     if (likely(events & SYS_SOCKET_RECV)) {
 	sock->sk->sk_data_ready(sock->sk, 0);
     }
-}
-
-/******************************************************************************/
-
-void *
-genlmsg_put(struct sk_buff *skb, u32 portid, u32 seq,
-                  const struct genl_family *family, int flags, u8 cmd)
-{
-        struct nlmsghdr *nlh;
-        struct genlmsghdr *hdr;
-
-        nlh = nlmsg_put(skb, portid, seq, family->id, GENL_HDRLEN +
-                        family->hdrsize, flags);
-        if (nlh == NULL)
-                return NULL;
-
-        hdr = nlmsg_data(nlh);
-        hdr->cmd = cmd;
-        hdr->version = family->version;
-        hdr->reserved = 0;
-
-        return (char *) hdr + GENL_HDRLEN;
 }
 
 /******************************************************************************/

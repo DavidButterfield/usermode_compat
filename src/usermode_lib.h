@@ -121,12 +121,8 @@ static inline _DIRTY void put_unaligned_le64(uint64_t v, void * p) { *(uint64_t 
 /* Include a few real kernel header files */
 #define MODULE
 #include "UMC/linux/typecheck.h"
-#include "UMC/linux/export.h"
 
-/* Types wanted by kernel's list.h */
-struct list_head { struct list_head *next, *prev; };
-struct hlist_head { struct hlist_node *first; };
-struct hlist_node { struct hlist_node *next, **pprev; };
+/* Wanted by kernel's list.h */
 #define LIST_POISON1  ((void *) 0x00100100 )
 #define LIST_POISON2  ((void *) 0x00200200 )
 #include "UMC/linux/list.h"
@@ -344,6 +340,9 @@ strnchr(string_t str, size_t strmax, int match)
 
 /*** Modules ***/
 
+extern struct module __this_module;
+#define THIS_MODULE (&__this_module)
+
 /* Externally-visible entry points for module init/exit functions */
 #define module_init(fn)		 extern errno_t _CONCAT(UMC_INIT_, fn)(void); \
 					errno_t _CONCAT(UMC_INIT_, fn)(void) { return fn(); }
@@ -397,7 +396,7 @@ struct kernel_param {			/* unused */
 #define ____cacheline_aligned		__attribute__((aligned(__CACHE_LINE_BYTES)))
 #define ____cacheline_aligned_in_smp	____cacheline_aligned
 
-#define prefetch(addr)			DO_NOTHING()
+#define prefetch(addr)			(void)0 //XXX DO_NOTHING()
 
 #define object_is_on_stack(addr)	false
 #define is_vmalloc_addr(addr)		false	/* no special-case memory */
@@ -1026,8 +1025,6 @@ call_usermodehelper(const char * progpath, char * argv[], char * envp[], int wai
 #define atomic_dec_and_test(ptr)	(!atomic_dec_return(ptr)) /* true if result *IS* zero */
 #define atomic_sub_and_test(n, ptr)	(!atomic_sub_return((n), (ptr)))
 
-// XXX Maybe #include "UMC/arch/x86/include/asm/cmpxchg.h"
-
 /* Installs the new 8-byte value at addr and returns the old value */
 #define xchg(addr, newv) ({ \
 	    typeof(*addr) ____newv = (newv); \
@@ -1045,8 +1042,10 @@ call_usermodehelper(const char * progpath, char * argv[], char * envp[], int wai
 	    __atomic_compare_exchange((addr), &(____oldv), &(____newv), false, \
 				      __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST); \
 })
-
-#define atomic_cmpxchg(atom, oldv, newv)    cmpxchg(&(atom)->i, (oldv), (newv))
+ 
+/* Returns the value of the atomic prior to the instruction */
+#define atomic_cmpxchg(atom, oldv, newv) \
+		__sync_val_compare_and_swap(&(atom)->i, (oldv), (newv))
 
 static inline bool
 _atomic_cas(atomic_t * atomic, int32_t const expected, int32_t const newval)
@@ -1341,10 +1340,6 @@ _mutex_trylock(mutex_t * m, sstring_t whence)
 {
     if (unlikely(pthread_mutex_trylock(&m->lock))) {
 	/* Can't get the lock because it is held by somebody */
-#ifdef UMC_LOCK_CHECKS
-	verify(m->owner != sys_thread_current(),
-	       "Thread attempts to acquire a mutex it already holds");
-#endif
 	return -EBUSY;
     }
 #ifdef UMC_LOCK_CHECKS
@@ -1370,6 +1365,10 @@ _mutex_lock(mutex_t * m, sstring_t whence)
 	if (likely(_mutex_trylock(m, whence) == E_OK)) {
 	    return;	/* got the lock */
 	}
+#ifdef UMC_LOCK_CHECKS
+	verify(m->owner != sys_thread_current(),
+	       "Thread attempts to acquire a mutex it already holds");
+#endif
 	_SPINWAITING();
     }
 
@@ -1793,7 +1792,7 @@ typedef struct wait_queue_head {
 		spin_lock_assert_holding(LOCKP); \
 		if (INNERLOCKP) spin_lock_assert_holding(INNERLOCKP); \
 		sys_time_t const _t_end = (_t_expire); /* evaluate _t_expire only once */ \
-		expect_gt(_t_end, sys_time_now()); \
+		expect_a(_t_end, sys_time_now()); \
 		bool _wait_ret = true; /* assume the condition will become true */ \
 		if (unlikely(!(COND))) { \
 		    errno_t _err; \
@@ -1859,7 +1858,12 @@ typedef struct wait_queue_head {
 		_ret; \
 	    })
 
-#define wait_event_timeout(WAITQ, COND, t_end)	_wait_event_timeout((WAITQ), (COND), (t_end))
+#define wait_event_timeout(WAITQ, COND, t_delta) ({			    \
+	sys_time_t ___t_end = sys_time_now() + t_delta;			    \
+	if (___t_end < (unsigned long)t_delta)				    \
+	    ___t_end = LONG_MAX;					    \
+	_wait_event_timeout((WAITQ), (COND), ___t_end);			    \
+})
 
 /* Non-exclusive wakeup WITH timeout, and periodic checks for kthread_should_stop */
 //XXX Limitation: when condition is met, returns 1 instead of the number of ticks remaining
@@ -2075,15 +2079,20 @@ UMC_sched_setscheduler(struct task_struct * task, int policy, struct sched_param
 static inline int
 signal_pending(struct task_struct * current_arg)
 {
+#if 0	//XXXXX broken
     sigset_t set;
     if (current_arg != current) {
 	sys_warning("Thread %s (%d) tried to get signal_pending() on thread %s (%d)",
 		    current->comm, current->pid, current_arg->comm, current_arg->pid);
 	/* Just give him his own signal info I guess XXX */
     }
-    if (sigpending(&set)) return false;
-    if (sigisemptyset(&set)) return false;
+    if (sigpending(&set)) return false;	    /* sigpending() failed */
+    if (sigisemptyset(&set)) return false;  /* no signals pending */
+    sys_warning("signals pending: 0x%lu", *(unsigned long *)(&set));
     return true;
+#else
+    return false;
+#endif
 }
 
 #define flush_signals(task)	DO_NOTHING()	//XXXX
@@ -3261,7 +3270,7 @@ struct gendisk {
     struct list_head			disk_list;
     int					major;
     int					first_minor;
-    char			      * disk_name;
+    char			        disk_name[32];
     void			      * private_data;
     struct hd_struct			part0;
     const struct block_device_operations * fops;
@@ -3273,15 +3282,26 @@ struct gendisk {
 extern struct list_head UMC_disk_list;
 extern struct spinlock UMC_disk_list_lock;
 
+#define UMC_DEV_PREFIX	"/UMCdev/"
+
 static inline struct block_device *
 lookup_bdev(const char * path)
 {
     struct block_device * ret = NULL;
     struct gendisk * pos;
+    const char *p;
+
+    if (strncmp(path, UMC_DEV_PREFIX, sizeof(UMC_DEV_PREFIX)-1)) {
+	sys_warning("Bad device name prefix: %s", path);
+	return NULL;
+    }
+
+    p = path + sizeof(UMC_DEV_PREFIX) - 1;  /* skip prefix */
+
     spin_lock(&UMC_disk_list_lock);
 
     list_for_each_entry(pos, &UMC_disk_list, disk_list)
-	if (!strcmp(pos->disk_name, path)) {
+	if (!strcmp(pos->disk_name, p)) {
 	    ret = disk_to_dev(pos)->this_bdev;
 	    expect(ret);
 	    break;
@@ -3299,7 +3319,7 @@ open_bdev_exclusive(const char *path, fmode_t mode, void *holder)
 
     bdev = lookup_bdev(path);
     if (!bdev)
-	    return NULL;
+	    return ERR_PTR(-ENODEV);
 
     if ((mode & FMODE_WRITE) && bdev_read_only(bdev)) {
 	    return ERR_PTR(-EACCES);
@@ -3341,6 +3361,10 @@ filp_open_bdev(string_t name, int inflags)
     fmode_t fmode = FMODE_READ | (flags == O_RDWR ? FMODE_WRITE : 0);
 
     struct block_device * bdev = open_bdev_exclusive(name, fmode, NULL);
+    if (PTR_ERR(bdev) <= 0) {
+	sys_warning("name='%s' not found, err=%ld", name, PTR_ERR(bdev));
+	return ERR_PTR(PTR_ERR(bdev));
+    }
 
     sys_notice("name='%s' size=%"PRIu64, bdev->bd_disk->disk_name, bdev_size(bdev));
     
@@ -3361,7 +3385,7 @@ static inline struct file *
 filp_open(string_t name, int flags, umode_t mode)
 {
     /* XXX Hack to detect internal block device names not in the real filesystem */
-    if (!strncmp(name, "/UMCdev/", 8))
+    if (!strncmp(name, UMC_DEV_PREFIX, sizeof(UMC_DEV_PREFIX)-1))
 	/* name is intended as a UMC internal name */
 	return filp_open_bdev(name, flags);
     else
@@ -3382,6 +3406,7 @@ static inline struct gendisk *
 alloc_disk(gfp_t gfp)
 {
     struct gendisk * disk = record_alloc(disk);
+    disk->part0.__dev = device_alloc();
     return disk;
 }
 
@@ -3633,18 +3658,17 @@ enum sock_type;
 typedef enum { SS_FREE } socket_state;
 
 struct sk_buff {
-    unsigned long		    len;    /* length of actual data */
+    unsigned int		    len;    /* length of actual data */
     uint8_t			  * data;   /* start of buffer */
     uint8_t			  * head;   /* data head pointer */
     uint8_t			  * tail;   /* data tail pointer */
     uint8_t			  * end;    /* end of buffer */
     char			    cb[48] __aligned(8);    /* control buffer */
-/*      struct sk_buff - socket buffer
- *      @next: Next buffer in list
+    struct sock			  * sk;	    /* owning socket */
+//  unsigned int		    data_len;	/* data length */
+/*      @next: Next buffer in list
  *      @prev: Previous buffer in list
- *      @sk: Socket we are owned by
  *      @dev: Device we arrived on/are leaving by
- *      @data_len: Data length
  *      @mac_len: Length of link layer header
  *      @hdr_len: writable header length of cloned skb
  *      @pkt_type: Packet class
@@ -3690,11 +3714,14 @@ alloc_skb(unsigned int size, gfp_t gfp)
 {
     struct sk_buff * skb = record_alloc(skb);
     uint8_t * data = kalloc(size, gfp);
-//  atomic_set(&skb->users, 1);
-    skb->head = data;
     skb->data = data;
-    skb->tail = data;
     skb->end = data + size;
+
+    skb->head = data;
+    skb->len = 0;
+    skb->tail = data;
+
+//  atomic_set(&skb->users, 1);
     return skb;
 }
 
@@ -3726,10 +3753,17 @@ struct sock {
     struct sk_prot  sk_prot_s;
 
     /* TCP */
-    u32				    copied_seq;	/* head of unread data */
-    u32				    rcv_nxt;	/* wanted next */
-    u32				    snd_una;	/* first byte wanted ack */
-    u32				    write_seq;	/* next byte for send buf */
+    u32				copied_seq;	/* head of unread data */
+    u32				rcv_nxt;	/* wanted next */
+    u32				snd_una;	/* first byte wanted ack */
+    u32				write_seq;	/* next byte for send buf */
+
+    /* Netlink */
+    struct sock		      * sk;		/* self-pointer hack */
+    struct netlink_callback	*cb;
+    struct mutex		*cb_mutex;
+    struct mutex		cb_def_mutex;
+    void			(*netlink_rcv)(struct sk_buff *skb);
 
     struct socket * sk_socket;	    //XXX
     long            sk_rcvtimeo;
@@ -3749,6 +3783,7 @@ struct sock {
     struct _irqthread     * rd_poll_event_thread;
 };
 
+#define netlink_sock			sock
 #define	tcp_sock			sock
 
 static inline struct tcp_sock *
@@ -3799,7 +3834,6 @@ struct socket {
     struct inode	    vfs_inode;
     socket_state	    state;
     unsigned long           flags;
-//  struct socket_wq __rcu  *wq;
     struct file             *file;
     struct sock		  * sk;			/* points at embedded sk_s */
     struct sock		    sk_s;
@@ -3816,8 +3850,6 @@ struct socket {
 #define SOCK_SNDBUF_LOCK	1
 #define SOCK_RCVBUF_LOCK	2
 #define SOCK_NOSPACE		2
-
-//#define sock_alloc()			vzalloc(sizeof(struct socket))
 
 #define kernel_sendmsg(sock, msg, vec, nvec, nbytes) \
 	    ({  (msg)->msg_iov = (vec); \
@@ -3898,7 +3930,6 @@ UMC_sock_init(struct socket * sock, struct file * file)
     sock->sk->fd = fd;
     sock->file = file;
     sock->flags = 0;
-//  sock->wq = NULL;
 
     /* Socket operations callable by application */
     sock->ops->shutdown = UMC_sock_shutdown;
@@ -3943,11 +3974,8 @@ UMC_sock_init(struct socket * sock, struct file * file)
 /* Wrap a backing real usermode SOCKET fd inside a simulated kernel struct file * */
 //XXX Support for fget/fput presently limited to sockets, one reference only
 static inline struct file *
-fget(unsigned int real_fd)
+_fget(unsigned int fd)
 {
-    int fd = dup(real_fd);	/* caller still owns the original */
-    trace("fget dups %d to %d", real_fd, fd);
-
     struct file * file = _file_alloc();
     struct socket * sock = record_alloc(sock);
     file->inode = &sock->vfs_inode;
@@ -3958,6 +3986,12 @@ fget(unsigned int real_fd)
     return file;
 }
 
+static inline struct file *
+fget(unsigned int real_fd)
+{
+    return _fget(dup(real_fd));	/* caller still owns the original fd */
+}
+
 static inline int
 sock_create_kern(int family, int type, int protocol, struct socket **newsock)
 {
@@ -3966,7 +4000,7 @@ sock_create_kern(int family, int type, int protocol, struct socket **newsock)
 	return fd;	/* -errno */
     }
 
-    struct file * file = fget(fd);
+    struct file * file = _fget(fd);
     if (!file) {
 	close(fd);
 	return -ENOMEM;
@@ -3976,19 +4010,56 @@ sock_create_kern(int family, int type, int protocol, struct socket **newsock)
     return E_OK;
 }
 
+struct fput_finish_work {
+    struct file			  * file;
+    struct work_struct		    work;
+};
+
+static void
+_fput_finish_work_fn(struct file * sockfile)
+{
+    struct sock * sk = SOCKET_I(sockfile->inode)->sk;
+    irqthread_stop(sk->rd_poll_event_thread);
+    irqthread_destroy(sk->rd_poll_event_thread);
+    close(sockfile->inode->UMC_fd);
+    vfree(SOCKET_I(sockfile->inode));	//XXX yuck
+    vfree(sockfile);
+}
+
+static void
+fput_finish_work_fn(struct work_struct * work)
+{
+    struct fput_finish_work * ffw;
+    ffw = container_of(work, struct fput_finish_work, work);
+    _fput_finish_work_fn(ffw->file);
+    record_free(ffw);
+}
+
 static inline void
 fput(struct file * sockfile)
 {
     assert_eq(sockfile->inode->UMC_type, I_TYPE_SOCK);
-    sys_poll_disable(SOCKET_I(sockfile->inode)->sk->wr_poll_event_task,
-		     SOCKET_I(sockfile->inode)->sk->wr_poll_entry);
-    sys_poll_disable(SOCKET_I(sockfile->inode)->sk->rd_poll_event_task,
-		     SOCKET_I(sockfile->inode)->sk->rd_poll_entry);
-    irqthread_stop(SOCKET_I(sockfile->inode)->sk->rd_poll_event_thread);
-    irqthread_destroy(SOCKET_I(sockfile->inode)->sk->rd_poll_event_thread);
-    close(sockfile->inode->UMC_fd);
-    vfree(SOCKET_I(sockfile->inode));	//XXX yuck
-    vfree(sockfile);
+    struct sock * sk = SOCKET_I(sockfile->inode)->sk;
+
+    sys_poll_disable(sk->wr_poll_event_task,
+		     sk->wr_poll_entry);
+    sys_poll_disable(sk->rd_poll_event_task,
+		     sk->rd_poll_entry);
+
+    sk->sk_user_data = NULL;
+    sk->sk_state_change = UMC_sock_cb_state;
+    sk->sk_data_ready = UMC_sock_cb_read;
+    sk->sk_write_space = UMC_sock_cb_write;
+
+    if (sys_thread_current() != sk->rd_poll_event_thread->SYS)
+	_fput_finish_work_fn(sockfile);
+    else {
+	/* irqthread can't shut itself down; use a helper */
+	struct fput_finish_work * ffw = record_alloc(ffw);
+	INIT_WORK(&ffw->work, fput_finish_work_fn);
+	ffw->file = sockfile;
+	schedule_work(&ffw->work);
+    }
 }
 
 #define sock_release(sock)		fput((sock)->file)
@@ -4340,12 +4411,18 @@ sg_free_table(struct sg_table *table)
 #include <sys/socket.h>
 #include "/usr/include/linux/netlink.h"	    //XXX
 
+extern int netlink_rcv_skb(struct sk_buff *skb, int (*cb)(struct sk_buff *, struct nlmsghdr *));
+extern void genl_rcv(struct sk_buff *skb);
+
 #define UMC_NL_KPID			17  //XXXXX
 
 struct netlink_callback {
     struct sk_buff		      * skb;
     struct nlmsghdr		      * nlh;
     long				args[6];
+    int (*dump)(struct sk_buff * skb, struct netlink_callback *cb);
+    int (*done)(struct netlink_callback *cb);
+    // int                     family;
 };
 
 struct netlink_skb_parms {
@@ -4363,14 +4440,19 @@ netlink_xmit(struct sock *sk, struct sk_buff *skb, u32 pid, u32 group, int nonbl
     // XXX there is no logic to support xmit-ready callbacks, so always do synchronous
     // int flags = MSG_NOSIGNAL | (nonblock ? MSG_DONTWAIT : 0);
     int flags = MSG_NOSIGNAL;
-
-    ssize_t nsent = send(sk->fd, skb->data, skb->len, flags);
+    ssize_t nsent = send(sk->fd, skb->head, skb->len, flags);
     errno_t ret = UMC_kernelize(nsent);
-    if (ret < 0)
+    if (ret < 0) {
+	perror("send: ");
+	sys_warning("error sending on netlink fd=%d", sk->fd);
+	sys_breakpoint();
 	return ret;
+    }
 
     skb->head += nsent;
     skb->len -= nsent;
+
+    //XXXXX Supposed to free the skb?  I don't think so.  Maybe need refcount!
 
     return E_OK;
 }
@@ -4378,8 +4460,8 @@ netlink_xmit(struct sock *sk, struct sk_buff *skb, u32 pid, u32 group, int nonbl
 #define netlink_unicast(sk, skb, pid, nonblock) \
 	    netlink_xmit((sk), (skb), (pid), 0, (nonblock))
 
-#define netlink_broadcast(sk, skb, pid, group) \
-	    netlink_xmit((sk), (skb), (pid), (group), 0)
+#define netlink_broadcast(sk, skb, pid, group) E_OK //XXXXX
+	    // netlink_xmit((sk), (skb), (pid), (group), 0)
 
 #define NLM_F_MULTI			0x02
 
@@ -4416,10 +4498,11 @@ nlmsg_trim(struct sk_buff *skb, void *mark)
 #define write_pnet(pnet, x)		    DO_NOTHING()
 #define nl_dump_check_consistent(cb, nlh)   DO_NOTHING()
 
-static inline void
+static inline int
 nlmsg_end(struct sk_buff *skb, struct nlmsghdr *nlh)
 {
         nlh->nlmsg_len = skb_tail_pointer(skb) - (unsigned char *)nlh;
+	return skb->len;
 }
 
 static inline void
@@ -4443,11 +4526,7 @@ nlmsg_multicast(struct sock *sk, struct sk_buff *skb,
 static inline int
 nlmsg_unicast(struct sock *sk, struct sk_buff *skb, u32 portid)
 {
-        int err;
-        err = netlink_unicast(sk, skb, portid, MSG_DONTWAIT);
-        if (err > 0)
-                err = 0;
-        return err;
+        return netlink_unicast(sk, skb, portid, 0);
 }
 
 static inline struct sk_buff *nlmsg_new(size_t payload, gfp_t flags)
@@ -4532,10 +4611,9 @@ errout:
         return err;
 }
 
-struct netlink_ext_ack;
 static inline int
 nlmsg_parse(const struct nlmsghdr *nlh, int hdrlen, struct nlattr *tb[], int maxtype,
-	    const struct nla_policy *policy, struct netlink_ext_ack *extack)
+	    const struct nla_policy *policy)
 {
         if (nlh->nlmsg_len < nlmsg_msg_size(hdrlen))
                 return -EINVAL;
@@ -4569,8 +4647,10 @@ __nlmsg_put(struct sk_buff *skb, u32 portid, u32 seq, int type, int len, int fla
 static inline struct nlmsghdr *
 nlmsg_put(struct sk_buff *skb, u32 portid, u32 seq, int type, int payload, int flags)
 {
-        if (unlikely(skb_tailroom(skb) < nlmsg_total_size(payload)))
-                return NULL;
+        if (unlikely(skb_tailroom(skb) < nlmsg_total_size(payload))) {
+	    sys_warning("not enough tailroom in skb");
+	    return NULL;
+	}
         return __nlmsg_put(skb, portid, seq, type, payload, flags);
 }
 
@@ -4615,7 +4695,8 @@ __nla_put_nohdr(struct sk_buff *skb, int attrlen, const void *data)
 {
         void *start;
         start = __nla_reserve_nohdr(skb, attrlen);
-        memcpy(start, data, attrlen);
+	if (attrlen)
+	    memcpy(start, data, attrlen);
 }
 
 static inline void 
@@ -4624,7 +4705,8 @@ __nla_put(struct sk_buff *skb, int attrtype, int attrlen,
 {
         struct nlattr *nla;
         nla = __nla_reserve(skb, attrtype, attrlen);
-        memcpy(nla_data(nla), data, attrlen);
+	if (attrlen)
+	    memcpy(nla_data(nla), data, attrlen);
 }
 
 static inline int
@@ -4741,12 +4823,6 @@ struct net {
 
 extern struct net init_net;
 
-struct genlmsghdr {
-        __u8    cmd;
-        __u8    version;
-        __u16   reserved;
-};
-
 #define GENL_HDRLEN			NLMSG_ALIGN(sizeof(struct genlmsghdr))
 #define GENL_NAMSIZ			16
 #define GENL_ADMIN_PERM			0x01
@@ -4757,10 +4833,6 @@ struct genl_family;
 #include "UMC/linux/typecheck.h"
 #include "UMC/linux/genetlink.h"
 #include "UMC/net/genetlink.h"
-// #include "/usr/include/libnl3/netlink/genl/mngt.h"
-
-#define genl_register_family(family)	E_OK		//XXXXXX
-#define genl_unregister_family(family)	(UMC_size_t_JUNK=E_OK)
 
 /*** rb_tree (faked) ***/
 
