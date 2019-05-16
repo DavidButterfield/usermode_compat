@@ -2277,6 +2277,7 @@ kthread_stop(struct task_struct * task)
 
     errno_t const ret = task->exit_code;
 
+    //XXXXX take task lock
     sys_thread_free(task->SYS);
     UMC_current_free(task);
 
@@ -2518,6 +2519,7 @@ _add_timer(struct timer_list * timer, sstring_t whence)
     assert_eq(timer->alarm, NULL);
     assert(timer->function);
     expect(timer->expires, "Adding timer with expiration at time zero");
+    //XXXXX FIX: alarm can go off before timer->alarm gets set!
     timer->alarm = sys_alarm_set(UMC_irqthread->event_task,
 				 UMC_alarm_handler, timer,
 				 jiffies_to_sys_time(timer->expires), whence);
@@ -3818,9 +3820,9 @@ tcp_sk(struct sock *sk)
 struct socket_ops {
     ssize_t (*sendpage)  (struct socket *, struct page *, int, size_t, int);
     int     (*setsockopt)(struct socket *, int, int, void *, int);
-    int     (*getname)   (struct socket *, struct sockaddr *, int *addr_len, int peer);
-    int     (*bind)      (struct socket *, struct sockaddr *, int addr_len);
-    int     (*connect)   (struct socket *, struct sockaddr *, int addr_len, int flags);
+    int     (*getname)   (struct socket *, struct sockaddr *, socklen_t *addr_len, int peer);
+    int     (*bind)      (struct socket *, struct sockaddr *, socklen_t addr_len);
+    int     (*connect)   (struct socket *, struct sockaddr *, socklen_t addr_len, int flags);
     int     (*listen)    (struct socket *, int len);
     int     (*accept)    (struct socket *, struct socket *, int flags, bool kern);
     int     (*shutdown)  (struct socket *, int);
@@ -3902,12 +3904,14 @@ extern ssize_t sock_no_sendpage(struct socket *sock, struct page *page, int offs
 extern errno_t UMC_setsockopt(struct socket * sock, int level, int optname,
 				void *optval, int optlen);
 extern errno_t UMC_sock_connect(struct socket * sock, struct sockaddr * addr,
-				socklen_t addrlen);
+				socklen_t addrlen, int flags);
 extern errno_t UMC_sock_bind(struct socket * sock, struct sockaddr *addr, socklen_t addrlen);
 extern errno_t UMC_sock_listen(struct socket * sock, int backlog);
 extern errno_t UMC_sock_accept(struct socket * sock, struct socket ** newsock, int flags);
 extern errno_t UMC_sock_shutdown(struct socket * sock, int k_how);
 extern void UMC_sock_discon(struct sock * sk, int XXX);
+extern errno_t UMC_sock_getname(struct socket * sock, struct sockaddr * addr,
+				socklen_t * addrlen, int peer);
 
 /* These are the original targets of the sk callbacks before the app intercepts them */
 extern void UMC_sock_cb_read(struct sock *, int obsolete);
@@ -3932,6 +3936,10 @@ UMC_sock_init(struct socket * sock, struct file * file)
     sock->flags = 0;
 
     /* Socket operations callable by application */
+    sock->ops->bind = UMC_sock_bind;
+    sock->ops->connect = UMC_sock_connect;
+    sock->ops->getname = UMC_sock_getname;
+    sock->ops->listen = UMC_sock_listen;
     sock->ops->shutdown = UMC_sock_shutdown;
     sock->ops->setsockopt = UMC_setsockopt;
     sock->ops->sendpage = sock_no_sendpage;	//XXXX perf

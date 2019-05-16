@@ -314,7 +314,9 @@ UMC_kthread_fn(void * v_task)
     errno_t ret = task->exit_code = task->run_fn(task->run_env);
 
     /* Let our stopping thread return from kthread_stop() */
+    //XXXXX take task lock
     complete(&task->stopped);
+    //XXXXX drop task lock
 	/*** Note this exiting thread's "sys_thread" and "current" may no longer exist ***/
 
     return ret;
@@ -483,7 +485,17 @@ UMC_setsockopt(struct socket * sock, int level, int optname, void *optval, int o
 }
 
 errno_t
-UMC_sock_connect(struct socket * sock, struct sockaddr * addr, socklen_t addrlen)
+UMC_sock_getname(struct socket * sock, struct sockaddr * addr, socklen_t * addrlen, int peer)
+{
+    if (peer)
+	return UMC_kernelize(getsockname(sock->sk->fd, addr, addrlen));
+    else
+	return UMC_kernelize(getpeername(sock->sk->fd, addr, addrlen));
+}
+
+//XXX flags ?
+errno_t
+UMC_sock_connect(struct socket * sock, struct sockaddr * addr, socklen_t addrlen, int flags)
 {
     return UMC_kernelize(connect(sock->sk->fd, addr, addrlen));
 }
