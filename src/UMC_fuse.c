@@ -132,7 +132,7 @@ pde_node_fmt(struct proc_dir_entry * pde, char * buf, size_t size, off_t * lofsp
     file->inode->UMC_fd = -1;
     PROC_I(file->inode)->pde = pde;
 
-    errno_t err;
+    error_t err;
 
     err = pde->proc_fops->open(file->inode, file);
     expect_noerr(err, "pde[%s]->proc_fops->open", pde->name);
@@ -228,7 +228,7 @@ pde_lookup(struct proc_dir_entry * pde_root, sstring_t path)
 }
 
 /* Lookup a path and pass back the "file mode" attributes from the corresponding PDE node */
-static errno_t
+static error_t
 pde_getattr(struct proc_dir_entry * pde_root, sstring_t path, struct stat * st)
 {
     trace_verbose("%s", path);
@@ -254,7 +254,7 @@ pde_getattr(struct proc_dir_entry * pde_root, sstring_t path, struct stat * st)
 }
 
 /* Lookup a directory path and pass back a list of its children */
-static errno_t
+static error_t
 pde_readdir(struct proc_dir_entry * pde_root, char const * path,
 			    void * buf, fuse_fill_dir_t filler, off_t ofs)
 {
@@ -348,21 +348,21 @@ pde_write(struct proc_dir_entry * pde_root, char const * path,
 static struct proc_dir_entry * PDE_ROOT;    //XXX limitation: single instance
 
 
-static errno_t
+static error_t
 UMC_fuse_getattr(sstring_t path, struct stat * st)
 {
     mutex_lock(&UMC_fuse_lock);
-    errno_t err = pde_getattr(PDE_ROOT, path, st);
+    error_t err = pde_getattr(PDE_ROOT, path, st);
     mutex_unlock(&UMC_fuse_lock);
     return err;
 }
 
-static errno_t
+static error_t
 UMC_fuse_readdir(char const * path, void * buf,
 		 fuse_fill_dir_t filler, off_t ofs, struct fuse_file_info * fi)
 {
     mutex_lock(&UMC_fuse_lock);
-    errno_t err = pde_readdir(PDE_ROOT, path, buf, filler, ofs);
+    error_t err = pde_readdir(PDE_ROOT, path, buf, filler, ofs);
     mutex_unlock(&UMC_fuse_lock);
     return err;
 }
@@ -482,7 +482,7 @@ UMC_fuse_run(void * unused)
 }
 
 /* Call once from any thread to initialize PDE_ROOT and start UMC_FUSE_THREAD */
-errno_t
+error_t
 UMC_fuse_start(char * mountpoint)
 {
     // trace_init(true, false);
@@ -505,7 +505,7 @@ UMC_fuse_start(char * mountpoint)
 
     UMC_FUSE_THREAD = sys_thread_alloc(UMC_fuse_run, NULL, kstrdup("UMC_fuse", IGNORED));
 
-    errno_t err = sys_thread_start(UMC_FUSE_THREAD);
+    error_t err = sys_thread_start(UMC_FUSE_THREAD);
     expect_noerr(err, "sys_thread_start UMC_FUSE_THREAD");
     if (err != E_OK) {
 	vfree(PDE_ROOT);
@@ -515,7 +515,7 @@ UMC_fuse_start(char * mountpoint)
     return err;
 }
 
-errno_t
+error_t
 UMC_fuse_exit(void)
 {
     trace();
@@ -539,7 +539,7 @@ UMC_fuse_exit(void)
     return E_OK;
 }
 
-errno_t
+error_t
 UMC_fuse_stop(void)
 {
     /* If we prod the fuse thread it will return from fuse_main to UMC_fuse_run */
@@ -644,13 +644,13 @@ module_param_read(struct file * file, void * buf, size_t readsize, loff_t * lofs
     return nchar;
 }
 
-static errno_t
+static error_t
 module_param_open(struct inode * inode, struct file * file)
 {
     return E_OK;
 }
 
-static errno_t
+static error_t
 module_param_release(struct inode * inode, struct file * file)
 {
     return E_OK;
