@@ -531,7 +531,8 @@ static int netlink_dump(struct sock *sk)
 	    sys_notice("cb->dump returns %d", len);
 	    if (len <= 0)
 		break;
-	    netlink_unicast(sk, skb, 0/*pid_ignored*/, 0);
+	    skb_get(skb);
+	    netlink_unicast(sk, skb, NETLINK_CB(cb->skb).pid, 0);
 	}
 
 	nlh = nlmsg_put(skb, NETLINK_CB(cb->skb).pid, cb->nlh->nlmsg_seq,
@@ -539,17 +540,15 @@ static int netlink_dump(struct sock *sk)
 	if (!nlh)
 		goto errout_skb;
 
-	usleep(1000*1000);	    //XXXXXX
-
 	memcpy(nlmsg_data(nlh), &len, sizeof(len));
-	netlink_unicast(sk, skb, 0/*pid_ignored*/, 0);
+	netlink_unicast(sk, skb, NETLINK_CB(cb->skb).pid, 0);
 
 	if (cb->done) {
 		sys_notice("call cb->done");
 		cb->done(cb);
 	}
-	nlk->cb = NULL;
 
+	nlk->cb = NULL;
 	kfree(cb);
 	return 0;
 
@@ -584,8 +583,10 @@ netlink_dump_start(struct sock *ssk, struct sk_buff *skb,
 		kfree(cb);
 		return -ECONNREFUSED;
 	}
-	nlk = nlk_sk(sk);
 
+	atomic_inc(&skb->users);
+
+	nlk = nlk_sk(sk);
 	nlk->cb = cb;
 
 	netlink_dump(sk);
