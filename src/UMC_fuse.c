@@ -547,8 +547,8 @@ UMC_fuse_stop(void)
     if (!fusethread) return -EINVAL;
 
     trace("tkill %d, SIGTERM", fusethread->tid);
-    int rc = syscall(SYS_tkill, fusethread->tid, SIGTERM);
-    expect_eq(rc, 0, "tgkill fuse tid=%u errno=%d '%s'",
+    int rc = tkill(fusethread->tid, SIGTERM);
+    expect_eq(rc, 0, "tkill fuse tid=%u errno=%d '%s'",
 		     fusethread->tid, errno, strerror(errno));
 
     /* Wait for fuse thread to return to UMC_fuse_run */
