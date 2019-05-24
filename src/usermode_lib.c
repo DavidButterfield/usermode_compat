@@ -51,7 +51,7 @@ struct page zero_page;
 static void
 on_netlink_error(struct sock * sk)
 {
-    sys_notice("state change on netlink");
+    sys_notice("state change on netlink fd=%d", sk->fd);
 }
 
 #define NETLINK_BUFSIZE 8192
@@ -63,9 +63,12 @@ on_netlink_recv(struct sock * sk, int len)
     expect_eq(len, 0);
 
     struct sk_buff * skb = alloc_skb(NETLINK_BUFSIZE, IGNORED);
-    skb->sk = sk;
 
-    ssize_t rc = recv(sk->fd, skb->data, NETLINK_BUFSIZE, MSG_DONTWAIT);
+    struct sockaddr_in src_addr;
+    socklen_t addrlen = sizeof(src_addr);
+    ssize_t rc = recvfrom(sk->fd, skb->data, NETLINK_BUFSIZE, MSG_DONTWAIT,
+			    &src_addr, &addrlen);
+
     if (rc <= 0) {
 	if (rc == 0)
 	    sys_notice("EOF on netlink fd=%d", sk->fd);
@@ -79,86 +82,33 @@ on_netlink_recv(struct sock * sk, int len)
 	}
 	struct socket * sock = container_of(sk, struct socket, sk_s);   /* annoying */
 	kfree_skb(skb);
-	init_net.genl_sock = NULL;  //XXXXXX
+	init_net.genl_sock = NULL;  //XXXXX
 
 	sock_release(sock);
 	return;
     }
 
-    skb->len = rc;
+    skb->len += rc;
     skb->tail += rc;
-    struct netlink_skb_parms * parms = (void *)skb->cb;
-    parms->sk = sk;
+    skb->sk = sk;
 
-    struct netlink_callback cb = {
-	.skb = skb,
-	.nlh = (void *)skb->head,
-    };
-
-    sk->cb = &cb;
+    NETLINK_CB(skb).pid = ntohs(src_addr.sin_port);
+    NETLINK_CB(skb).sk = sk;
 
     sys_notice("calling netlink handler skb=%p buf=%p len=%u", skb, skb->head, skb->len);
 
     mutex_lock(sk->cb_mutex);
-    sk->netlink_rcv(skb);	    /* XXX hopefully synchronous */
+    sk->netlink_rcv(skb);
     mutex_unlock(sk->cb_mutex);
-}
-
-static void
-on_netlink_incoming(struct sock * sk)
-{
-    struct socket * sock = container_of(sk, struct socket, sk_s);   /* annoying */
-    struct socket * newsock;
-    assert_eq(sk, UMC_kernel_netlink_listener_sock->sk);
-    sys_notice("received incoming netlink connection");
-
-    error_t err = UMC_sock_accept(sock, &newsock, 0/*flags for newsock*/);
-    if (err) {
-	if (err == -EAGAIN)
-	    sys_notice("EAGAIN netlink listener");
-	else
-	    sys_warning("dropped incoming netlink connection");
-	return;
-    }
-
-    //XXXXXX
-    if (init_net.genl_sock) {
-	sys_warning("BUSY: ignore incoming connection");
-	return;
-    }
-
-    sys_notice("accepted incoming netlink connection");
-
-    struct sock * nsk = newsock->sk;
-    nsk->sk = nsk;	/* self-reference because our nsk fields live in sk */
-    nsk->netlink_rcv = genl_rcv;
-    nsk->cb_mutex = &nsk->cb_def_mutex;
-    mutex_init(nsk->cb_mutex);
-
-    /* Intercept receive events */
-    nsk->sk_user_data = nsk;
-    nsk->sk_data_ready = on_netlink_recv;
-    nsk->sk_state_change = on_netlink_error;
-
-    //XXXXXX nasty!  For now only handles one connection at a time
-    init_net.genl_sock = nsk;
-
-    /* In case a receive event occurred before we intercepted them */
-    nsk->sk_data_ready(newsock->sk->sk_user_data, 0);
-}
-
-static void
-on_netlink_incoming2(struct sock * sk, int ignored)
-{
-    on_netlink_incoming(sk);
 }
 
 extern void UMC_genl_init(void);
 
+/* Open a datagram socket for the kernel side of the simulated netlink */
 static void
 establish_netlink(void)
 {
-    if (UMC_kernel_netlink_listener_sock) {
+    if (init_net.genl_sock) {
 	sys_warning("netlink listener already established!");
 	return;
     }
@@ -167,33 +117,24 @@ establish_netlink(void)
 
     struct sockaddr_in addr = {
 	.sin_family = AF_INET,
-	// .sin_addr = { htonl(0x7f000001) },	//127.0.0.1
-	.sin_port = htons(1234),
+	.sin_addr = { htonl(0x7f000001) },	//127.0.0.1
+	.sin_port = htons(UMC_NETLINK_PORT),
+	.sin_zero = { 0 }
     };
 
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    int fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (fd < 0) {
 	perror("UMC_init netlink: ");
 	sys_warning("UMC_init could not open generic netlink");
-
-    } else if (fcntl(fd, F_SETFL, O_NONBLOCK) < 0) {
-	perror("UMC_init netlink fcntl(O_NONBLOCK): ");
-	sys_warning("UMC_init could not set netlink O_NONBLOCK");
-	close(fd);
 
     } else if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
 	perror("UMC_init netlink bind: ");
 	sys_warning("UMC_init could not bind generic netlink");
 	close(fd);
 
-    } else if (listen(fd, 16) < 0) {
-	perror("UMC_init netlink listen: ");
-	sys_warning("UMC_init could not listen on netlink");
-	close(fd);
-
     } else {
 	sys_notice("starting netlink listener");
-	/* _fget() starts the connection handler thread for the listener */
+
 	struct file * file = _fget(fd);
 	if (!file) {
 	    sys_warning("could not allocate file for netlink listener");
@@ -201,28 +142,67 @@ establish_netlink(void)
 	    return;
 	}
 
-	UMC_kernel_netlink_listener_sock = SOCKET_I(file->inode);
+	struct socket * sock = SOCKET_I(file->inode);
+	struct sock * sk = sock->sk;
+	sk->sk = sk;	/* self-reference: our netlink sock fields live in sk */
+	sk->cb_mutex = &sk->cb_def_mutex;
+	mutex_init(sk->cb_mutex);
+	sk->netlink_rcv = genl_rcv; /* where kernel code wants incoming nl msgs */
+	sk->sk_user_data = sk;
 
-	/* Intercept incoming-socket-ready events */
-	UMC_kernel_netlink_listener_sock->sk->sk_user_data = UMC_kernel_netlink_listener_sock->sk;
-	UMC_kernel_netlink_listener_sock->sk->sk_state_change = on_netlink_incoming;
-	UMC_kernel_netlink_listener_sock->sk->sk_data_ready = on_netlink_incoming2;
+	/* Fill in the ipaddr/port in the socket structure from the real socket */
+	UMC_sock_filladdrs(sock);
 
-#if 0
-	/* In case a connection event occurred before we intercepted it */
-	UMC_kernel_netlink_listener_sock->sk->sk_state_change(
-		UMC_kernel_netlink_listener_sock->sk->sk_user_data);
-#endif
+	/* This is where kernel code likes to find its netlink sk */
+	init_net.genl_sock = sk;
+
+	/* Enable event polling and start the receive thread */
+	UMC_sock_poll_start(sock, on_netlink_recv, NULL, on_netlink_error, "netlink_recv");
     }
+}
+
+/* A real SIGHUP */
+static void
+sighup_handler(int signo)
+{
+    sys_notice("REAL SIGNAL %u (0x%lx) received by task %s (%d), pending: 0x%lx",
+	    signo, 1L<<signo, current->comm, current->pid, current->signals_pending);
+}
+
+/* Setup for inter-thread signals with a real SIGHUP */
+static void
+sighup_setup(void)
+{
+    struct sigaction act = {
+	.sa_handler = sighup_handler
+    };
+    sigaction(SIGHUP, &act, NULL);
+}
+
+/* Is a fake signal pending for this thread? */
+int
+signal_pending(struct task_struct * task)
+{
+    if (!task->signals_pending)
+	return false;
+    sys_notice("signals pending tid=%u: 0x%lx", task->pid, task->signals_pending);
+    return true;
 }
 
 /* Initialize the usermode_lib usermode compatibility module */
 /* mountname is the path to the procfs or sysfs mount point */
-errno_t
+error_t
 UMC_init(char * mountname)
 {
-    page_init(&zero_page, 0);
-    zero_page.vaddr = empty_zero_page;
+    /* Initialize a page of zeros for general use */
+    struct page * page = &zero_page;
+    kref_init(&page->kref);
+    mutex_init(&page->lock);
+    page->order = 0;	/* single page */
+    page_address(page) = empty_zero_page;
+    spin_lock(&UMC_pagelist_lock);
+    list_add(&page->UMC_page_list, &UMC_pagelist);
+    spin_unlock(&UMC_pagelist_lock);
 
     /* Set up "current" for this initial thread --
      * Even though this isn't necessarily a (simulated) "kernel" thread (e.g. iscsi-scstd
@@ -241,7 +221,7 @@ UMC_init(char * mountname)
     }
 
     /* fuse forks, so do it before opening file descriptors */
-    errno_t err = UMC_fuse_start(mountname);
+    error_t err = UMC_fuse_start(mountname);
     expect_noerr(err, "UMC_fuse_start");
 
     UMC_irqthread = irqthread_run("UMC_irqthread");
@@ -253,6 +233,8 @@ UMC_init(char * mountname)
 
     establish_netlink();
 
+    sighup_setup();
+
     return E_OK;
 }
 
@@ -260,7 +242,7 @@ void
 UMC_exit(void)
 {
     assert(current);
-    errno_t err;
+    error_t err;
 
     sock_release(UMC_kernel_netlink_listener_sock);
     UMC_kernel_netlink_listener_sock = NULL;
@@ -289,7 +271,7 @@ UMC_exit(void)
 /******************************************************************************/
 
 /* kthread starts running on-thread */
-errno_t
+error_t
 UMC_kthread_fn(void * v_task)
 {
     struct task_struct * task = v_task;
@@ -311,7 +293,7 @@ UMC_kthread_fn(void * v_task)
     wait_for_completion(&task->start_release);
 
 				      /*** Run the kthread logic ***/
-    errno_t ret = task->exit_code = task->run_fn(task->run_env);
+    error_t ret = task->exit_code = task->run_fn(task->run_env);
 
     /* Let our stopping thread return from kthread_stop() */
     //XXXXX take task lock
@@ -323,7 +305,7 @@ UMC_kthread_fn(void * v_task)
 }
 
 /* irqthread runs event_task on-thread */
-errno_t
+error_t
 UMC_irqthread_fn(void * v_irqthread)
 {
     struct _irqthread * irqthread = v_irqthread;
@@ -333,7 +315,7 @@ UMC_irqthread_fn(void * v_irqthread)
     //XXX affinity?
     //XXX wait for start release?
 
-    errno_t ret = sys_event_task_run(irqthread->event_task);  /*** run the event_task logic ***/
+    error_t ret = sys_event_task_run(irqthread->event_task);  /*** run the event_task logic ***/
 
     complete(&irqthread->stopped);
 	/*** Note this exiting thread's "sys_thread" and "current" may no longer exist ***/
@@ -341,7 +323,7 @@ UMC_irqthread_fn(void * v_irqthread)
 }
 
 /* work queue thread starts running on-thread */
-static errno_t
+static error_t
 _UMC_work_queue_thr(struct workqueue_struct * workq, char * wq_name)
 {
     spin_lock(&workq->lock);
@@ -380,7 +362,7 @@ _UMC_work_queue_thr(struct workqueue_struct * workq, char * wq_name)
     return E_OK;
 }
 
-errno_t
+error_t
 UMC_work_queue_thr(void * v_workq)
 {
     struct workqueue_struct * workq = v_workq;
@@ -389,7 +371,7 @@ UMC_work_queue_thr(void * v_workq)
 }
 
 /* tasklet thread starts running on-thread */
-static errno_t
+static error_t
 _UMC_tasklet_thr(struct tasklet_struct * tasklet, const char * tasklet_name)
 {
     spin_lock(&tasklet->lock);
@@ -422,7 +404,7 @@ _UMC_tasklet_thr(struct tasklet_struct * tasklet, const char * tasklet_name)
 }
 
 /* Create a tasklet thread */
-errno_t
+error_t
 UMC_tasklet_thr(void * v_tasklet)
 {
     struct tasklet_struct * tasklet = v_tasklet;
@@ -432,14 +414,16 @@ UMC_tasklet_thr(void * v_tasklet)
 
 /* Deliver system timer alarms to emulated kernel timer */
 void
-UMC_alarm_handler(void * const v_timer, uint64_t const now, errno_t const err)
+UMC_alarm_handler(void * const v_timer, uint64_t const now, error_t const err)
 {
     assert_eq(err, E_OK);
     if (unlikely(err != E_OK)) return;
 
     struct timer_list * const timer = v_timer;
-    assert(timer->alarm);
-    assert(time_after_eq(now, jiffies_to_sys_time(timer->expires)));
+    //XXXXX expect(timer->alarm);   //XXX Bug when alarm goes off quickly
+
+    //XXX A very recent call to mod_timer() may have updated the expire time
+    // assert(time_after_eq(now, jiffies_to_sys_time(timer->expires)));
     assert(timer->function);
     timer->alarm = NULL;
 
@@ -478,71 +462,122 @@ sock_no_sendpage(struct socket *sock, struct page *page, int offset, size_t size
     return UMC_kernelize64(send(sock->sk->fd, page_address(page) + offset, size, flags));
 }
 
-errno_t
+error_t
 UMC_setsockopt(struct socket * sock, int level, int optname, void *optval, int optlen)
 {
     return UMC_kernelize(setsockopt(sock->sk->fd, level, optname, optval, optlen));
 }
 
-errno_t
+error_t
 UMC_sock_getname(struct socket * sock, struct sockaddr * addr, socklen_t * addrlen, int peer)
 {
     if (peer)
-	return UMC_kernelize(getsockname(sock->sk->fd, addr, addrlen));
-    else
 	return UMC_kernelize(getpeername(sock->sk->fd, addr, addrlen));
+    else
+	return UMC_kernelize(getsockname(sock->sk->fd, addr, addrlen));
 }
 
-//XXX flags ?
-errno_t
+/* Does not enable poll events or start a receive handler thread for the socket */
+error_t
 UMC_sock_connect(struct socket * sock, struct sockaddr * addr, socklen_t addrlen, int flags)
 {
-    return UMC_kernelize(connect(sock->sk->fd, addr, addrlen));
+    //XXX flags ?
+    struct sockaddr_in * inaddr = (struct sockaddr_in *)addr;
+    sys_notice("%s (%d) connecting socket fd=%d to %d.%d.%d.%d port %u",
+		current->comm, current->pid, sock->sk->fd,
+		NIPQUAD(inaddr->sin_addr), inaddr->sin_port);
+
+    error_t err = UMC_kernelize(connect(sock->sk->fd, addr, addrlen));
+    if (!err) {
+	sock->sk->sk_state = TCP_ESTABLISHED;
+	UMC_sock_filladdrs(sock);
+    }
+
+    sys_notice("%s (%d) connected socket fd=%d to %d.%d.%d.%d port %u err=%d",
+		current->comm, current->pid, sock->sk->fd,
+		NIPQUAD(inaddr->sin_addr), inaddr->sin_port, err);
+    return err;
 }
 
-errno_t
+error_t
 UMC_sock_bind(struct socket * sock, struct sockaddr *addr, socklen_t addrlen)
 {
-    return UMC_kernelize(bind(sock->sk->fd, addr, addrlen));
+    error_t err = -ENOPROTOOPT;
+    assert_eq(addr->sa_family, AF_INET);
+
+    if (addr->sa_family == AF_INET) {
+	struct sockaddr_in * inaddr = (struct sockaddr_in *)addr;
+	if (inaddr->sin_port != 0) {
+	    int optval = true;
+	    UMC_setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
+	}
+
+	err = UMC_kernelize(bind(sock->sk->fd, addr, addrlen));
+	if (err == E_OK) {
+	    sys_notice("%s (%d) binds socket fd=%d to %d.%d.%d.%d port %u",
+			current->comm, current->pid, sock->sk->fd,
+			NIPQUAD(inaddr->sin_addr), inaddr->sin_port);
+	    UMC_sock_filladdrs(sock);
+	} else {
+	    sys_warning("%s (%d) ERROR %d binding fd=%d to %d.%d.%d.%d port %u",
+			current->comm, current->pid, sock->sk->fd,
+			err, NIPQUAD(inaddr->sin_addr), inaddr->sin_port);
+	}
+    }
+
+    return err;
 }
 
-errno_t
+error_t
 UMC_sock_listen(struct socket * sock, int backlog)
 {
-    return UMC_kernelize(listen(sock->sk->fd, backlog));
+    error_t ret = UMC_kernelize(listen(sock->sk->fd, backlog));
+    if (ret != E_OK)
+	return ret;
+
+    if (sock->sk->sk_state_change == UMC_sock_cb_state)
+	sys_warning("Listening on sockfd=%d with unset sk_state_change", sock->sk->fd);
+
+    sock->sk->is_listener = true;
+    UMC_sock_poll_start(sock, NULL, NULL, sock->sk->sk_state_change, "listener");
+    return ret;
 }
 
-//XXXXXX need to be able to intercept receives before enabling them in fget
-errno_t
+/* Does not enable poll events or start a receive handler thread for the socket */
+error_t
 UMC_sock_accept(struct socket * sock, struct socket ** newsock, int flags)
 {
     struct sockaddr addr;
     socklen_t addrlen = sizeof(struct sockaddr);
+    assert(sock->sk->is_listener);
 
     int fd = UMC_kernelize(accept4(sock->sk->fd, &addr, &addrlen, flags));
     if (fd < 0) {
 	*newsock = NULL;
+	sys_warning("Accept failed listenfd=%d err=%d", sock->sk->fd, fd);
 	return fd;  /* -errno */
     }
 
-    /* _fget() starts the receive handler thread for this socket */
+    /* Wrap a file/inode/sock/sk around the fd we just accepted */
     struct file * file = _fget(fd);
     if (!file) {
 	close(fd);
 	return -ENOMEM;
     }
 
+    *newsock = SOCKET_I(file->inode);
+    assert_eq((*newsock)->sk->fd, fd);
+
+    UMC_sock_filladdrs(*newsock);	/* get the local and peer addresses */
+    sock->sk->sk_state = TCP_ESTABLISHED;
+
     sys_notice("Accepted incoming socket connection listenfd=%d newfd=%d",
 		sock->sk->fd, fd);	//XXX
-
-    *newsock = SOCKET_I(file->inode);
-
-    assert_eq((*newsock)->sk->fd, fd);
 
     return E_OK;
 }
 
-errno_t
+error_t
 UMC_sock_shutdown(struct socket * sock, int k_how)
 {
     int u_how;
@@ -568,13 +603,13 @@ UMC_sock_discon(struct sock * sk, int XXX)
 /* These are the original targets of the sk callbacks before the app intercepts them --
  * Because our event model here is EDGE TRIGGERED, we can get away with doing nothing
  */
-void UMC_sock_cb_read(struct sock * sk, int obsolete)	{ sys_warning(""); }
-void UMC_sock_cb_write(struct sock * sk)		{ sys_warning(""); }
-void UMC_sock_cb_state(struct sock * sk)		{ sys_warning(""); }
+void UMC_sock_cb_read(struct sock * sk, int obsolete)	{ sys_warning("fd=%d", sk->fd); }
+void UMC_sock_cb_write(struct sock * sk)		{ sys_warning("fd=%d", sk->fd); }
+void UMC_sock_cb_state(struct sock * sk)		{ sys_warning("fd=%d", sk->fd); }
 
 /* Callback on event_task when socket fd ready, dispatches to XMIT and/or RECV sk callback */
 void
-UMC_sock_xmit_event(void * env, uintptr_t events, errno_t err)
+UMC_sock_xmit_event(void * env, uintptr_t events, error_t err)
 {
     struct socket * sock = env;
     if (unlikely(err != E_OK)) {
@@ -595,7 +630,7 @@ UMC_sock_xmit_event(void * env, uintptr_t events, errno_t err)
 }
 
 void
-UMC_sock_recv_event(void * env, uintptr_t events, errno_t err)
+UMC_sock_recv_event(void * env, uintptr_t events, error_t err)
 {
     struct socket * sock = env;
     if (unlikely(err != E_OK)) {
@@ -611,7 +646,10 @@ UMC_sock_recv_event(void * env, uintptr_t events, errno_t err)
     }
 
     if (likely(events & SYS_SOCKET_RECV)) {
-	sock->sk->sk_data_ready(sock->sk, 0);
+	if (unlikely(sock->sk->is_listener))
+	    sock->sk->sk_state_change(sock->sk);
+	else
+	    sock->sk->sk_data_ready(sock->sk, 0);
     }
 }
 
