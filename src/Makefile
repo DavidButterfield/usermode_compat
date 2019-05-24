@@ -1,15 +1,22 @@
 # UMC/trunk/src/Makefile
 # Makefile for usermode compatibility for Linux kernel source code
-# Imports optional SYS_SERVICE_INCL, CFLAGS, MY_KERNEL
+# Imports optional SYS_SERVICE_INCL, CFLAGS, REF_KERNEL
 
-MY_KERNEL=/home/dave/git/linux-2.6.32.27
+# 
+
+### Place to get real kernel header files (preferably of the level being emulated)
+ifndef REF_KERNEL
+# export REF_KERNEL := /usr/src/linux-headers-$(shell uname -r | sed -e s/-generic//)
+export REF_KERNEL := /home/dave/git/linux-2.6.32.27
+endif
 
 MY_CFLAGS += -DDEBUG
-MY_CFLAGS += -fsanitize=undefined
+# MY_CFLAGS += -fsanitize=undefined
 # MY_CFLAGS += -DNDEBUG
 # MY_CFLAGS += -DTRACE_TRACE
 # MY_CFLAGS += -DTRACE_VERBOSE
 
+MY_CFLAGS += -O0
 # MY_CFLAGS += -Og
 # MY_CFLAGS += -O1
 # MY_CFLAGS += -O2
@@ -27,11 +34,6 @@ SYS_SERVICE_INCL=../../MTE/include
 
 MY_CFLAGS += -I$(SYS_SERVICE_INCL)
 MTELIB_H := $(SYS_SERVICE_INCL)/mtelib.h
-
-### Place to get real kernel header files (does not have to be the current kernel)
-ifndef MY_KERNEL
-export MY_KERNEL := /usr/src/linux-headers-$(shell uname -r | sed -e s/-generic//)
-endif
 
 ########################  Enable most compiler warnings  #######################
 
@@ -51,11 +53,13 @@ WFLAGS_WARN += -Wmissing-prototypes
 WFLAGS_WARN += -Wnested-externs
 WFLAGS_WARN += -Wmissing-include-dirs
 WFLAGS_WARN += -Wunsafe-loop-optimizations
-WFLAGS_WARN += -Wcast-qual
 WFLAGS_WARN += -Wformat=2
 WFLAGS_WARN += -Wshadow
 WFLAGS_WARN += -Wswitch-default
 WFLAGS_WARN += -Wswitch-enum
+WFLAGS_WARN += -Wfloat-conversion
+WFLAGS_WARN += -fstrict-aliasing -Wstrict-aliasing
+# WFLAGS_WARN += -Wcast-qual		# 2 in kernel genetlink.h
 # WFLAGS_WARN += -Wwrite-strings
 
 ## too noisy
@@ -71,7 +75,7 @@ MY_CFLAGS += $(WFLAGS_WARN) $(WFLAGS_INHIBIT)
 ################################################################################
 SHELL=/bin/bash
 
-MY_CFLAGS += -g -fPIC -fno-omit-frame-pointer -D_GNU_SOURCE -I. -Ikinclude -Ikinclude/UMC
+MY_CFLAGS += -g -ggdb -fno-omit-frame-pointer -D_GNU_SOURCE -I. -Ikinclude -Ikinclude/UMC -fPIC
 
 SRCS_D = usermode_lib.c UMC_fuse.c UMC_genl.c
 OBJS_D = $(SRCS_D:.c=.o)
@@ -134,25 +138,25 @@ kinclude_links:
 	@### without the UMC name the dummy empty header file gets included.
 	@mkdir -p kinclude/UMC/linux/unaligned
 	@mkdir -p kinclude/UMC/linux/byteorder
-	@ln -s $(MY_KERNEL)/include/linux/unaligned/generic.h	kinclude/UMC/linux/unaligned/
-	@ln -s $(MY_KERNEL)/include/linux/byteorder/generic.h	kinclude/UMC/linux/byteorder/
-	@ln -s $(MY_KERNEL)/include/linux/unaligned/access_ok.h	kinclude/UMC/linux/unaligned/
-	@ln -s $(MY_KERNEL)/include/linux/list.h		kinclude/UMC/linux/
+	@ln -s $(REF_KERNEL)/include/linux/unaligned/generic.h	kinclude/UMC/linux/unaligned/
+	@ln -s $(REF_KERNEL)/include/linux/byteorder/generic.h	kinclude/UMC/linux/byteorder/
+	@ln -s $(REF_KERNEL)/include/linux/unaligned/access_ok.h	kinclude/UMC/linux/unaligned/
+	@ln -s $(REF_KERNEL)/include/linux/list.h		kinclude/UMC/linux/
 	@#
-	@ln -s $(MY_KERNEL)/include/linux/typecheck.h		kinclude/UMC/linux/
-	@ln -s $(MY_KERNEL)/include/linux/rbtree.h		kinclude/UMC/linux/
-	@ln -s $(MY_KERNEL)/include/linux/genetlink.h		kinclude/UMC/linux/
+	@ln -s $(REF_KERNEL)/include/linux/typecheck.h		kinclude/UMC/linux/
+	@ln -s $(REF_KERNEL)/include/linux/rbtree.h		kinclude/UMC/linux/
+	@ln -s $(REF_KERNEL)/include/linux/genetlink.h		kinclude/UMC/linux/
 	@#
 	@mkdir -p kinclude/UMC/scsi
-	@ln -s $(MY_KERNEL)/include/scsi/scsi.h			kinclude/UMC/scsi/
-	@ln -s $(MY_KERNEL)/include/scsi/scsi_cmnd.h		kinclude/UMC/scsi/
-	@ln -s $(MY_KERNEL)/include/scsi/scsi_eh.h		kinclude/UMC/scsi/
+	@ln -s $(REF_KERNEL)/include/scsi/scsi.h			kinclude/UMC/scsi/
+	@ln -s $(REF_KERNEL)/include/scsi/scsi_cmnd.h		kinclude/UMC/scsi/
+	@ln -s $(REF_KERNEL)/include/scsi/scsi_eh.h		kinclude/UMC/scsi/
 	@#
 	@mkdir -p kinclude/UMC/arch/x86/include/asm
-	@ln -s $(MY_KERNEL)/arch/x86/include/asm/cmpxchg.h	kinclude/UMC/arch/x86/include/asm/
+	@ln -s $(REF_KERNEL)/arch/x86/include/asm/cmpxchg.h	kinclude/UMC/arch/x86/include/asm/
 	@#
 	@mkdir -p kinclude/UMC/net
-	@ln -s $(MY_KERNEL)/include/net/genetlink.h		kinclude/UMC/net
+	@ln -s $(REF_KERNEL)/include/net/genetlink.h		kinclude/UMC/net
 
 kinclude_empty2:
 	@### Create empty files so #includes of them successfully do nothing
