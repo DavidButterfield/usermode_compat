@@ -395,7 +395,6 @@ int genl_register_family(struct genl_family *family)
 			goto errout_locked;
 		}
 
-		sys_notice("assigned %d as netlink family->id", newid);
 		family->id = newid;
 	}
 
@@ -528,7 +527,6 @@ static int netlink_dump(struct sock *sk)
 
 	while (true) {
 	    len = cb->dump(skb, cb);
-	    sys_notice("cb->dump returns %d", len);
 	    if (len <= 0)
 		break;
 	    skb_get(skb);
@@ -544,7 +542,6 @@ static int netlink_dump(struct sock *sk)
 	netlink_unicast(sk, skb, NETLINK_CB(cb->skb).pid, 0);
 
 	if (cb->done) {
-		sys_notice("call cb->done");
 		cb->done(cb);
 	}
 
@@ -637,7 +634,6 @@ static int genl_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
 			return -EOPNOTSUPP;
 
 		genl_unlock();
-		sys_notice("netlink_dump_start");
 		err = netlink_dump_start(init_net.genl_sock, skb, nlh,
 					 ops->dumpit, ops->done);
 		genl_lock();
@@ -662,7 +658,6 @@ static int genl_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
 	info.attrs = family->attrbuf;
 	// genl_info_net_set(&info, net);
 
-	sys_notice("doit");
 	return ops->doit(skb, &info);
 }
 

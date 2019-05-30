@@ -95,8 +95,6 @@ on_netlink_recv(struct sock * sk, int len)
     NETLINK_CB(skb).pid = ntohs(src_addr.sin_port);
     NETLINK_CB(skb).sk = sk;
 
-    sys_notice("calling netlink handler skb=%p buf=%p len=%u", skb, skb->head, skb->len);
-
     mutex_lock(sk->cb_mutex);
     sk->netlink_rcv(skb);
     mutex_unlock(sk->cb_mutex);
@@ -161,22 +159,22 @@ establish_netlink(void)
     }
 }
 
-/* A real SIGHUP */
+/* A real signal */
 static void
-sighup_handler(int signo)
+UMC_sig_handler(int signo)
 {
     sys_notice("REAL SIGNAL %u (0x%lx) received by task %s (%d), pending: 0x%lx",
 	    signo, 1L<<signo, current->comm, current->pid, current->signals_pending);
 }
 
-/* Setup for inter-thread signals with a real SIGHUP */
+/* Setup for emulated inter-thread signals with a real signal */
 static void
-sighup_setup(void)
+UMC_sig_setup(void)
 {
     struct sigaction act = {
-	.sa_handler = sighup_handler
+	.sa_handler = UMC_sig_handler
     };
-    sigaction(SIGHUP, &act, NULL);
+    sigaction(UMC_SIGNAL, &act, NULL);
 }
 
 /* Is a fake signal pending for this thread? */
@@ -233,7 +231,7 @@ UMC_init(char * mountname)
 
     establish_netlink();
 
-    sighup_setup();
+    UMC_sig_setup();
 
     return E_OK;
 }
@@ -282,23 +280,19 @@ UMC_kthread_fn(void * v_task)
 	     sys_thread_name(task->SYS), task->SYS,
 	     task->comm, task);
 
-    /* Let our creating thread return from kthread_start */
+    /* Let our creating thread return from kthread_create() */
     complete(&task->started);
 
-    if (current->affinity_is_set) {
-	sched_setaffinity(current->pid/*tid*/,
-			  sizeof(current->cpus_allowed), (cpu_set_t *)&current->cpus_allowed);
-    }
-
+    /* completed by wake_up_process() */
     wait_for_completion(&task->start_release);
 
 				      /*** Run the kthread logic ***/
     error_t ret = task->exit_code = task->run_fn(task->run_env);
 
     /* Let our stopping thread return from kthread_stop() */
-    //XXXXX take task lock
+    spin_lock(&task->stopped.wait.lock);
     complete(&task->stopped);
-    //XXXXX drop task lock
+    spin_unlock(&task->stopped.wait.lock);
 	/*** Note this exiting thread's "sys_thread" and "current" may no longer exist ***/
 
     return ret;
@@ -332,9 +326,9 @@ _UMC_work_queue_thr(struct workqueue_struct * workq, char * wq_name)
     while (!kthread_should_stop()) {
 
 	/* Process each item on the workq one-by-one in the order queued */
-	while (!list_empty(&workq->list)) {
+	while (!list_empty_careful(&workq->list)) {
 	    struct work_struct * work = list_first_entry(&workq->list, typeof(*work), entry);
-	    list_del(&work->entry);
+	    list_del_init(&work->entry);
 	    spin_unlock(&workq->lock);	    /* unlock workq while delivering callback */
 	    {
 		work->fn(work);		    /* callback to work function */
@@ -351,7 +345,7 @@ _UMC_work_queue_thr(struct workqueue_struct * workq, char * wq_name)
 	/* Announce we are sleepy so enqueuers will wake us up (we are holding the lock) */
 	workq->is_idle = true;
 	    /* wait_event_locked() may drop and retake workq->lock */
-	wait_event_locked(workq->wake, !list_empty(&workq->list)
+	wait_event_locked(workq->wake, !list_empty_careful(&workq->list)
 						|| atomic_read(&workq->is_flushing) 
 						|| kthread_should_stop(),
 				       lock, workq->lock);
@@ -369,6 +363,8 @@ UMC_work_queue_thr(void * v_workq)
     /* Put name of the queue somewhere visible in a gdb backtrace */
     return _UMC_work_queue_thr(workq, workq->name);
 }
+
+#ifdef UMC_TASKLETS
 
 /* tasklet thread starts running on-thread */
 static error_t
@@ -412,6 +408,8 @@ UMC_tasklet_thr(void * v_tasklet)
     return _UMC_tasklet_thr(tasklet, tasklet->name);
 }
 
+#endif
+
 /* Deliver system timer alarms to emulated kernel timer */
 void
 UMC_alarm_handler(void * const v_timer, uint64_t const now, error_t const err)
@@ -439,20 +437,6 @@ UMC_delayed_work_process(uintptr_t u_dwork)
     dwork->work.fn(&dwork->work);
 }
 
-int
-autoremove_wake_function(struct wait_queue_entry *wq_entry, unsigned mode, int sync, void *key)
-{
-    int ret = true;
-    sys_warning("XXXXX autoremove_wake_function wants to call default_wake_function");
-#ifdef XXXXX
-    wake_up(wq_entry);	//XXXXX ?
-    ret = default_wake_function(wq_entry, mode, sync, key);
-    if (ret)
-#endif
-         list_del_init(&wq_entry->entry);
-    return ret;
-}
-
 /******************************************************************************/
 /* The sock->ops point to these shim functions */
 
@@ -465,7 +449,13 @@ sock_no_sendpage(struct socket *sock, struct page *page, int offset, size_t size
 error_t
 UMC_setsockopt(struct socket * sock, int level, int optname, void *optval, int optlen)
 {
-    return UMC_kernelize(setsockopt(sock->sk->fd, level, optname, optval, optlen));
+    error_t ret = UMC_kernelize(setsockopt(sock->sk->fd, level, optname, optval, optlen));
+#if 0
+    sys_notice("%s (%d) SETSOCKOPT fd=%d level=%d optname=%d optval=0x%x optlen=%d returns %d",
+		current->comm, current->pid, sock->sk->fd,
+		level, optname, *(int *)optval, optlen, ret);
+#endif
+    return ret;
 }
 
 error_t
@@ -509,7 +499,7 @@ UMC_sock_bind(struct socket * sock, struct sockaddr *addr, socklen_t addrlen)
 	struct sockaddr_in * inaddr = (struct sockaddr_in *)addr;
 	if (inaddr->sin_port != 0) {
 	    int optval = true;
-	    UMC_setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
+	    UMC_setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));	//XXX
 	}
 
 	err = UMC_kernelize(bind(sock->sk->fd, addr, addrlen));
@@ -545,34 +535,36 @@ UMC_sock_listen(struct socket * sock, int backlog)
 
 /* Does not enable poll events or start a receive handler thread for the socket */
 error_t
-UMC_sock_accept(struct socket * sock, struct socket ** newsock, int flags)
+UMC_sock_accept(struct socket * listener, struct socket ** newsock, int flags)
 {
     struct sockaddr addr;
     socklen_t addrlen = sizeof(struct sockaddr);
-    assert(sock->sk->is_listener);
+    assert(listener->sk->is_listener);
 
-    int fd = UMC_kernelize(accept4(sock->sk->fd, &addr, &addrlen, flags));
-    if (fd < 0) {
+    int newfd = UMC_kernelize(accept4(listener->sk->fd, &addr, &addrlen, flags));
+    if (newfd < 0) {
 	*newsock = NULL;
-	sys_warning("Accept failed listenfd=%d err=%d", sock->sk->fd, fd);
-	return fd;  /* -errno */
+	sys_warning("Accept failed listenfd=%d err=%d", listener->sk->fd, newfd);
+	return newfd;  /* -errno */
     }
 
-    /* Wrap a file/inode/sock/sk around the fd we just accepted */
-    struct file * file = _fget(fd);
+    /* Wrap a file/inode/sock/sk around the newfd we just accepted */
+    struct file * file = _fget(newfd);
     if (!file) {
-	close(fd);
+	close(newfd);
 	return -ENOMEM;
     }
 
     *newsock = SOCKET_I(file->inode);
-    assert_eq((*newsock)->sk->fd, fd);
+    assert_eq((*newsock)->sk->fd, newfd);
 
     UMC_sock_filladdrs(*newsock);	/* get the local and peer addresses */
-    sock->sk->sk_state = TCP_ESTABLISHED;
+    (*newsock)->sk->sk_state = TCP_ESTABLISHED;
 
-    sys_notice("Accepted incoming socket connection listenfd=%d newfd=%d",
-		sock->sk->fd, fd);	//XXX
+    (*newsock)->sk->sk_state_change = listener->sk->sk_state_change;	//XXX why?
+
+    sys_notice("Accepted incoming socket connection listenfd=%d newfd=%d peer_port=%d",
+		listener->sk->fd, newfd, ntohs((*newsock)->sk->sk_dport));
 
     return E_OK;
 }
@@ -685,3 +677,108 @@ struct kobj_type device_ktype = {
         .default_attrs  = default_device_attrs,
         .release        = device_release,
 };
+
+/******************************************************************************/
+
+#if 1
+#undef READ_ONCE
+#undef WRITE_ONCE
+#define BP()				sys_breakpoint()
+#define MEM_MASK(x)			((unsigned long)((typeof(x))(-1)) & 0xfffffffffffff000ul)
+#define MEM_UNINIT(x)			(MEM_MASK(x) & MEM_PATTERN_ALLOC_64)
+#define MEM_BAD(x)			(MEM_MASK(x) == MEM_UNINIT(x))
+#define WRITE_ONCE(x, val)		((MEM_BAD(x) || ((x) && MEM_BAD(*(uintptr_t *)x)) || MEM_BAD(val)) ? BP() : (*_VOLATIZE(&(x)) = (val)))
+#define READ_ONCE(x)			((MEM_BAD(x) || ((x) && MEM_BAD(*(uintptr_t *)x))) ? BP() : (*_VOLATIZE(&(x))))
+#endif
+
+struct rb_node *
+rb_next(const struct rb_node *node)
+{
+        struct rb_node *parent;
+        if (RB_EMPTY_NODE(node))
+                return NULL;
+
+        if (node->rb_right) {
+                node = node->rb_right;
+                while (node->rb_left)
+                        node = node->rb_left;
+                return _unconstify(node);
+        }
+
+        while ((parent = rb_parent(node)) && node == parent->rb_right)
+                node = parent;
+
+        return parent;
+}
+
+/* Replace an old (current) child of parent with a new one, in root's tree */
+/* On return parent refers to the new child.  Child is not modified. */
+static inline void
+__rb_change_child(struct rb_node *old, struct rb_node *new,
+                  struct rb_node *parent, struct rb_root *root)
+{
+        if (parent) {
+		assert(old == parent->rb_left || old == parent->rb_right);
+                if (parent->rb_left == old)
+                        WRITE_ONCE(parent->rb_left, new);
+		else if (parent->rb_right == old)
+                        WRITE_ONCE(parent->rb_right, new);
+                else
+			sys_breakpoint();
+        } else {
+		assert(old == root->rb_node);
+                WRITE_ONCE(root->rb_node, new);
+	}
+}
+
+/* Remove node from root's tree.  Move node's successor into node's position */
+void
+rb_erase(struct rb_node * const node, struct rb_root * const root)
+{
+        struct rb_node * right = node->rb_right;
+        struct rb_node * left = node->rb_left;
+        struct rb_node * parent = rb_parent(node);
+        if (!left) {
+		/* No left child -- replace node with its right child, if any */
+                if (right)
+			rb_set_parent(right, parent);
+                __rb_change_child(node, right, parent, root);
+        }
+	else if (!right) {
+		/* No right child -- replace node with its left child */
+                rb_set_parent(left, parent);
+                __rb_change_child(node, left, parent, root);
+        }
+	else {	/* Node being removed has two children */
+		/* Find successor, which will move to take over node's position in the tree */
+		struct rb_node * successor = right;
+
+		while (successor->rb_left) {
+			parent = successor;
+			successor = successor->rb_left;
+		}
+
+		if (successor != right) {
+			/* successor is the left child of parent.
+			 * successor has no left child; move successor's right child (if any)
+			 * to replace successor as the new left child of successor's parent */
+			WRITE_ONCE(parent->rb_left, successor->rb_right);
+			if (parent->rb_left)
+				rb_set_parent(parent->rb_left, parent);
+
+			/* successor takes on node's right subtree as its own */
+			WRITE_ONCE(successor->rb_right, node->rb_right);
+			rb_set_parent(successor->rb_right, successor);
+		}
+
+		/* successor takes on node's left subtree as its own */
+		WRITE_ONCE(successor->rb_left, node->rb_left);
+		rb_set_parent(successor->rb_left, successor);
+
+		/* successor takes node's parent as its own */
+		rb_set_parent(successor, rb_parent(node));
+
+		/* node's parent takes successor child as replacement for node */
+		__rb_change_child(node, successor, rb_parent(node), root);
+	}
+}
