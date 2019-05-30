@@ -136,6 +136,7 @@ static inline _DIRTY void put_unaligned_le64(uint64_t v, void * p) { *(uint64_t 
 #include "sys_debug.h"	    /* assert, verify, expect, panic, warn, etc */
 
 /* Avoid use of "expect" symbol conflicted by drbd */
+#undef expect
 #define expect_ne(x, y, fmtargs...)	_expect_ne((x), (y), ""fmtargs)
 #define _expect_ne(x, y, fmt, args...)	expect_eq((x) == (y), 0, "%s == %s"fmt, \
 						    __stringify(x), __stringify(y), ##args)
