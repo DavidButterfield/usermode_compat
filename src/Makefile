@@ -1,13 +1,11 @@
-# UMC/trunk/src/Makefile
+# usermode_compat/src/Makefile
 # Makefile for usermode compatibility for Linux kernel source code
 # Imports optional SYS_SERVICE_INCL, CFLAGS, REF_KERNEL
 
-# 
-
-### Place to get real kernel header files (preferably of the level being emulated)
 ifndef REF_KERNEL
-# export REF_KERNEL := /usr/src/linux-headers-$(shell uname -r | sed -e s/-generic//)
-export REF_KERNEL := /home/dave/git/linux-2.6.32.27
+### Place to get real kernel header files (preferably of the level being emulated)
+# REF_KERNEL := /usr/src/linux-headers-$(shell uname -r | sed -e s/-generic//)
+REF_KERNEL := `/bin/pwd`/../../linux-2.6.32.27
 endif
 
 MY_CFLAGS += -DDEBUG
@@ -29,8 +27,10 @@ MY_CFLAGS += -O0
 # MY_CFLAGS += -DVALGRIND
 # MY_CFLAGS += -DNVALGRIND
 
+ifndef SYS_SERVICE_INCL
 ### Place to get mtelib.h and sys_service.h (et. al.), if not in /usr/include
 SYS_SERVICE_INCL=../../MTE/include
+endif
 
 MY_CFLAGS += -I$(SYS_SERVICE_INCL)
 MTELIB_H := $(SYS_SERVICE_INCL)/mtelib.h
@@ -84,10 +84,6 @@ all:	check_kinclude check_include cscope
 	$(MAKE) .depend
 	$(MAKE) $(OBJS_D)
 
-drbd:	all
-
-scst:	all
-
 check_kinclude:
 	@if [[ ! -d kinclude ]] ; then $(MAKE) kinclude; fi
 
@@ -114,10 +110,11 @@ endif
 
 clean:
 	rm -f *.o .depend
+	rm -rf kinclude
+	rm -f tags cscope.out
 
 extraclean: clean
-	rm -f *.orig *.rej tags cscope.out
-	rm -rf kinclude
+	rm -f *.orig *.rej
 
 cscope:
 	@cscope -b -c -R
