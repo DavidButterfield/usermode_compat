@@ -458,12 +458,27 @@ UMC_setsockopt(struct socket * sock, int level, int optname, void *optval, int o
     return ret;
 }
 
+/* Note: The semantics of the arguments to the kernel function and C-library function differ.
+ *	 The kernel function ignores the incoming addrlen and assumes it is big enough.  The
+ *	 peer argument is intended to be 0 to get the local address, nonzero to get the peer
+ *	 address, with 1 denoting to return the peer address only if connected.
+ */
 error_t
 UMC_sock_getname(struct socket * sock, struct sockaddr * addr, socklen_t * addrlen, int peer)
 {
-    if (peer)
-	return UMC_kernelize(getpeername(sock->sk->fd, addr, addrlen));
-    else
+    *addrlen = sizeof(struct sockaddr_in);
+    if (peer) {
+	if (peer == 1)
+	    return UMC_kernelize(getpeername(sock->sk->fd, addr, addrlen));
+	else {
+	    struct sockaddr_in *inaddr = (struct sockaddr_in *)addr;
+	    memset(inaddr, 0, *addrlen);
+	    inaddr->sin_family = sock->sk->sk_family;
+	    inaddr->sin_port = sock->sk->sk_dport;
+	    inaddr->sin_addr = sock->sk->inet_sk.daddr;
+	    return E_OK;
+	}
+    } else
 	return UMC_kernelize(getsockname(sock->sk->fd, addr, addrlen));
 }
 

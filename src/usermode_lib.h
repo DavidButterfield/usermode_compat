@@ -268,7 +268,7 @@ _ROUNDUP(uint64_t const v, uint64_t const q) { return (v + q - 1) / q * q; }
 							> (unsigned long)(-4096))
 #define IS_ERR_OR_NULL(ptr)		(unlikely(!ptr) || IS_ERR(ptr))
 
-#define	ERESTARTSYS			EINTR
+#define	ERESTARTSYS			512
 #define ENOTSUPP			ENOTSUP
 
 #define random32()			(random())  //XXX
