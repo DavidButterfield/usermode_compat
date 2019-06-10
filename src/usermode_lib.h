@@ -3294,6 +3294,7 @@ blk_mq_rq_to_pdu(struct request *rq)
 #define register_blkdev(major, name)		E_OK
 #define unregister_blkdev(major, name)		DO_NOTHING()
 
+#define blkdev_issue_flush(bdev, xxx)				    (-EPERM)
 #define blkdev_issue_discard(bdev, sector, nr_sects, gfp, flags)    (-EOPNOTSUPP)   //XXXX
 
 #define bd_link_disk_holder(a, b)	E_OK		//XXX sysfs
@@ -3317,6 +3318,7 @@ struct bdev_inode {
 #define BDEV_I(inode)			({ assert_eq((inode)->UMC_type, I_TYPE_BDEV); \
 					   &container_of(inode, struct bdev_inode, vfs_inode)->bdev; \
 					})
+
 /* Create a block device */
 static inline struct block_device *
 bdget(dev_t devt)
