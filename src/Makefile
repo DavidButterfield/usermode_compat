@@ -136,9 +136,12 @@ DIR := $(shell /bin/pwd)
 
 include:   _include
 	@echo Modified header files:
+	cp kincl_mod/netlink.h	    include/net/
 	cp kincl_mod/kernel.h	    include/linux/
 	cp kincl_mod/types.h	    include/linux/
-	cp kincl_mod/netlink.h	    include/net/
+	touch			    include/linux/version.h
+	touch			    include/linux/export.h
+	touch			    include/linux/autoconf.h
 
 _include:
 	@echo Copy selected kernel header files for inclusion by apps building for usermode
