@@ -1,4 +1,3 @@
-#include "usermode_lib.h"
 #define MC 0
 
 /* Lifted from 2.6.32 kernel net/netlink/genetlink.c */
@@ -20,7 +19,6 @@ static inline void genl_unlock(void)
 
 static struct list_head family_ht[GENL_FAM_TAB_SIZE];
 
-void UMC_genl_init(void);
 void
 UMC_genl_init(void)
 {
@@ -503,99 +501,6 @@ int genl_unregister_family(struct genl_family *family)
 
 /******************************************************************************/
 
-#define nlk_sk(sk)  (sk)
-
-static int netlink_dump(struct sock *sk)
-{
-	struct netlink_sock *nlk = nlk_sk(sk);
-	struct netlink_callback *cb;
-	struct sk_buff *skb;
-	struct nlmsghdr *nlh;
-	int len, err = -ENOBUFS;
-
-	skb = alloc_skb(NLMSG_GOODSIZE, GFP_KERNEL);
-	if (!skb)
-		goto errout;
-
-	skb->sk = sk;
-
-	cb = nlk->cb;
-	if (cb == NULL) {
-		err = -EINVAL;
-		goto errout_skb;
-	}
-
-	while (true) {
-	    len = cb->dump(skb, cb);
-	    if (len <= 0)
-		break;
-	    skb_get(skb);
-	    netlink_unicast(sk, skb, NETLINK_CB(cb->skb).pid, 0);
-	}
-
-	nlh = nlmsg_put(skb, NETLINK_CB(cb->skb).pid, cb->nlh->nlmsg_seq,
-			    NLMSG_DONE, sizeof(len), NLM_F_MULTI);
-	if (!nlh)
-		goto errout_skb;
-
-	memcpy(nlmsg_data(nlh), &len, sizeof(len));
-	netlink_unicast(sk, skb, NETLINK_CB(cb->skb).pid, 0);
-
-	if (cb->done) {
-		cb->done(cb);
-	}
-
-	nlk->cb = NULL;
-	kfree(cb);
-	return 0;
-
-errout_skb:
-	kfree_skb(skb);
-errout:
-	return err;
-}
-
-static int
-netlink_dump_start(struct sock *ssk, struct sk_buff *skb,
-		       struct nlmsghdr *nlh,
-		       int (*dump)(struct sk_buff *skb,
-				   struct netlink_callback *),
-		       int (*done)(struct netlink_callback *))
-{
-	struct netlink_callback *cb;
-	struct sock *sk;
-	struct netlink_sock *nlk;
-
-	cb = kzalloc(sizeof(*cb), GFP_KERNEL);
-	if (cb == NULL)
-		return -ENOBUFS;
-
-	cb->dump = dump;
-	cb->done = done;
-	cb->nlh = nlh;
-	cb->skb = skb;
-
-	sk = init_net.genl_sock;
-	if (sk == NULL) {
-		kfree(cb);
-		return -ECONNREFUSED;
-	}
-
-	atomic_inc(&skb->users);
-
-	nlk = nlk_sk(sk);
-	nlk->cb = cb;
-
-	netlink_dump(sk);
-
-	/* We successfully started a dump, by returning -EINTR we
-	 * signal not to send ACK even if it was requested.
-	 */
-	return -EINTR;
-}
-
-/******************************************************************************/
-
 static int genl_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
 {
 	struct genl_ops *ops;
@@ -661,7 +566,6 @@ static int genl_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
 	return ops->doit(skb, &info);
 }
 
-static
 void netlink_ack(struct sk_buff *in_skb, struct nlmsghdr *nlh, int err)
 {
 	struct sk_buff *skb;
@@ -684,14 +588,7 @@ void netlink_ack(struct sk_buff *in_skb, struct nlmsghdr *nlh, int err)
 	netlink_unicast(in_skb->sk, skb, NETLINK_CB(in_skb).pid, MSG_DONTWAIT);
 }
 
-static inline unsigned char *__skb_pull(struct sk_buff *skb, unsigned int len)
-{
-	skb->len -= len;
-//	BUG_ON(skb->len < skb->data_len);
-	return skb->data += len;
-}
-
-static unsigned char *skb_pull(struct sk_buff *skb, unsigned int len)
+unsigned char *skb_pull(struct sk_buff *skb, unsigned int len)
 {
 	return unlikely(len > skb->len) ? NULL : __skb_pull(skb, len);
 }
