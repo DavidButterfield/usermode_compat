@@ -67,6 +67,8 @@ WFLAGS_WARN += -fstrict-aliasing -Wstrict-aliasing
 # WFLAGS_WARN += -Wconversion
 # WFLAGS_WARN += -Wsign-conversion
 
+WFLAGS_INHIBIT += -Wno-sign-compare	# some kernel code
+
 # silly
 WFLAGS_INHIBIT += -Wno-unused-parameter
 
