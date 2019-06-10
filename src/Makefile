@@ -5,7 +5,7 @@
 ifndef REF_KERNEL
 ### Place to get real kernel header files (preferably of the level being emulated)
 # REF_KERNEL := /usr/src/linux-headers-$(shell uname -r | sed -e s/-generic//)
-REF_KERNEL := `/bin/pwd`/../../linux-2.6.32.27
+REF_KERNEL := $(shell /bin/pwd)/../../linux-2.6.32.27
 endif
 
 MY_CFLAGS += -DDEBUG
@@ -75,30 +75,31 @@ MY_CFLAGS += $(WFLAGS_WARN) $(WFLAGS_INHIBIT)
 ################################################################################
 SHELL=/bin/bash
 
-MY_CFLAGS += -g -ggdb -fno-omit-frame-pointer -D_GNU_SOURCE -I. -Ikinclude -Ikinclude/UMC -fPIC
+MY_CFLAGS += -g -ggdb -fno-omit-frame-pointer -D_GNU_SOURCE -fPIC -I. -isystem ./arch/x86/include -isystem include
 
-SRCS_D = usermode_lib.c UMC_fuse.c UMC_genl.c
+SRCS_D = usermode_lib.c UMC_fuse.c
 OBJS_D = $(SRCS_D:.c=.o)
 
-all:	check_kinclude check_include cscope
+all:	check_include check_MTE
+	$(MAKE) cscope
 	$(MAKE) .depend
 	$(MAKE) $(OBJS_D)
 
-check_kinclude:
-	@if [[ ! -d kinclude ]] ; then $(MAKE) kinclude; fi
+check_include:
+	@if [[ ! -d include ]] ; then $(MAKE) include; fi
 
 ifndef MTELIB_H
-check_include:	check_kinclude
+check_MTE:
 	@if [[ ! -f /usr/include/mtelib.h ]] ; then $(MAKE) include; fi
 else
-check_include:	check_kinclude
-	@if [[ ! -f /usr/include/mtelib.h && ! -f $(MTELIB_H) ]] ; then $(MAKE) include; fi
+check_MTE:
+	@if [[ ! -f /usr/include/mtelib.h && ! -f $(MTELIB_H) ]] ; then $(MAKE) install; fi
 endif
 
-include:
-	@echo "***** Install MTE header files into /usr/include or set Makefile SYS_SERVICE_INCL to point at MTE/trunk/include *****" ; exit 1
+install:
+	@echo "***** Manually copy MTE header files into /usr/include or set Makefile SYS_SERVICE_INCL to point at MTE/trunk/include *****" ; exit 1
 
-%.o: %.c Makefile | check_kinclude check_include
+%.o: %.c Makefile | check_include check_MTE
 	$(CC) -c -o $@ $(CFLAGS) $(MY_CFLAGS) $<
 
 ifeq (.depend,$(wildcard .depend))
@@ -110,189 +111,196 @@ endif
 
 clean:
 	rm -f *.o .depend
-	rm -rf kinclude
 	rm -f tags cscope.out
 
 extraclean: clean
 	rm -f *.orig *.rej
+	rm -rf include arch
 
 cscope:
 	@cscope -b -c -R
 	@ctags        -R
 
-.PHONY:	all include check_include check_kinclude cscope kinclude
+.PHONY:	all include check_MTE check_include cscope
 
 #########################################################################
 
-### Create the include directories we use to spoof kernel headers in various ways --
-### kinclude tree contains empty files, and symlinks to real kernel header files in UMC subdirectory
+# Create a mostly-empty copy of the include and arch subdirectories of $(REF_KERNEL).
+# First build an empty tree, then copy in the files we need.
+# The empty tree provides non-failing, but empty, targets for #include directives.
+# Usermode build uses the actual kernel headers copied below.
 
-kinclude:   kinclude_links kinclude_empty kinclude_empty2
+DIR := $(shell /bin/pwd)
 
-kinclude_links:
-	@### Create links to a few kernel headers we really do want to include.
-	@### Give them /UMC/ names so they are only included explicitly;
-	@### without the UMC name the dummy empty header file gets included.
-	@mkdir -p kinclude/UMC/linux/unaligned
-	@mkdir -p kinclude/UMC/linux/byteorder
-	@ln -s $(REF_KERNEL)/include/linux/unaligned/generic.h	kinclude/UMC/linux/unaligned/
-	@ln -s $(REF_KERNEL)/include/linux/byteorder/generic.h	kinclude/UMC/linux/byteorder/
-	@ln -s $(REF_KERNEL)/include/linux/unaligned/access_ok.h	kinclude/UMC/linux/unaligned/
-	@ln -s $(REF_KERNEL)/include/linux/list.h		kinclude/UMC/linux/
-	@#
-	@ln -s $(REF_KERNEL)/include/linux/typecheck.h		kinclude/UMC/linux/
-	@ln -s $(REF_KERNEL)/include/linux/rbtree.h		kinclude/UMC/linux/
-	@ln -s $(REF_KERNEL)/include/linux/genetlink.h		kinclude/UMC/linux/
-	@#
-	@mkdir -p kinclude/UMC/scsi
-	@ln -s $(REF_KERNEL)/include/scsi/scsi.h			kinclude/UMC/scsi/
-	@ln -s $(REF_KERNEL)/include/scsi/scsi_cmnd.h		kinclude/UMC/scsi/
-	@ln -s $(REF_KERNEL)/include/scsi/scsi_eh.h		kinclude/UMC/scsi/
-	@#
-	@mkdir -p kinclude/UMC/arch/x86/include/asm
-	@ln -s $(REF_KERNEL)/arch/x86/include/asm/cmpxchg.h	kinclude/UMC/arch/x86/include/asm/
-	@#
-	@mkdir -p kinclude/UMC/net
-	@ln -s $(REF_KERNEL)/include/net/genetlink.h		kinclude/UMC/net
+include:   _include
+	@echo Modified header files:
+	cp kincl_mod/kernel.h	    include/linux/
+	cp kincl_mod/types.h	    include/linux/
+	cp kincl_mod/netlink.h	    include/net/
 
-kinclude_empty2:
-	@### Create empty files so #includes of them successfully do nothing
-	@### These get #included by the SCST kernel files when compiling for SCST_USERMODE
-	@### These correspond to the /UMC/ names linked above
-	@mkdir -p kinclude/linux/unaligned
-	@mkdir -p kinclude/linux/byteorder
-	@touch kinclude/linux/byteorder/generic.h
-	@touch kinclude/linux/list.h
-	@touch kinclude/linux/unaligned/access_ok.h
-	@touch kinclude/linux/unaligned/generic.h
-	@#
-	@touch kinclude/linux/typecheck.h
-	@touch kinclude/linux/rbtree.h
-	@touch kinclude/linux/genetlink.h
-	@#
-	@mkdir -p kinclude/scsi
-	@touch kinclude/scsi/scsi_cmnd.h
-	@touch kinclude/scsi/scsi_eh.h
-	@touch kinclude/scsi/scsi.h
-	@#
-	@mkdir -p kinclude/arch/x86/include/asm
-	@touch kinclude/arch/x86/include/asm/cmpxchg.h
-	@#
-	@#
-	@mkdir -p kinclude/net
-	@touch kinclude/net/genetlink.h
-
-kinclude_empty:
-	@### Create empty files so #includes of them successfully do nothing
-	@### These get #included by the SCST kernel files when compiling for SCST_USERMODE
-	@mkdir -p kinclude/asm
-	@touch kinclude/asm/alternative.h
-	@touch kinclude/asm/atomic.h
-	@touch kinclude/asm/checksum.h
-	@touch kinclude/asm/cmpxchg_64.h
-	@touch kinclude/asm/cpufeatures.h
-	@touch kinclude/asm/div64.h
-	@touch kinclude/asm/io.h
-	@touch kinclude/asm/kmap_types.h
-	@touch kinclude/asm/param.h
-	@touch kinclude/asm/semaphore.h
-	@touch kinclude/asm/system.h
-	@touch kinclude/asm/uaccess.h
-	@touch kinclude/asm/unaligned.h
-	@#
-	@mkdir -p kinclude/asm-generic
-	@touch kinclude/asm-generic/iomap.h
-	@touch kinclude/asm-generic/kmap_types.h
-	@touch kinclude/asm-generic/memory_model.h
-	@#
-	@mkdir -p kinclude/uapi/linux/sched/
-	@touch kinclude/uapi/linux/sched/types.h
-	@#
-	@mkdir -p kinclude/linux/sched/
-	@touch kinclude/linux/sched/signal.h
-	@#
-	@mkdir -p kinclude/net
-	@touch kinclude/net/ipv6.h
-	@touch kinclude/net/netlink.h
-	@touch kinclude/net/net_namespace.h
-	@touch kinclude/net/sock.h
-	@touch kinclude/net/tcp.h
-	@touch kinclude/net/tcp_states.h
-	@#
-	@mkdir -p kinclude/crypto
-	@touch kinclude/crypto/hash.h
-	@#
-	@mkdir -p kinclude/scsi
-	@touch kinclude/scsi/scsi_device.h
-	@touch kinclude/scsi/scsi_driver.h
-	@touch kinclude/scsi/scsi_host.h
-	@#
-	@mkdir -p kinclude/rdma
-	@touch kinclude/rdma/ib_verbs.h
-	@touch kinclude/rdma/ib_cache.h
-	@#
-	@mkdir -p kinclude/linux
-	@touch kinclude/linux/{autoconf.h,bio.h,blkdev.h,bug.h,compiler.h,cpumask.h}
-	@touch kinclude/linux/{crc32c.h,crc-t10dif.h,ctype.h,delay.h,dma-mapping.h}
-	@touch kinclude/linux/{fcntl.h,file.h,hash.h,init.h,interrupt.h,ip.h,kernel.h}
-	@touch kinclude/linux/{kmod.h,kobject.h,kthread.h,ktime.h,lockdep.h,log2.h,mm.h}
-	@touch kinclude/linux/{module.h,moduleparam.h,mount.h,mutex.h,namei.h}
-	@touch kinclude/linux/{pagemap.h,poison.h,poll.h,proc_fs.h,scatterlist.h}
-	@touch kinclude/linux/{seq_file.h,slab.h,spinlock.h,swap.h,syscalls.h,sysfs.h}
-	@touch kinclude/linux/{time.h,timer.h,uaccess.h,uio.h,vermagic.h,version.h}
-	@touch kinclude/linux/{vmalloc.h,wait.h,workqueue.h,writeback.h}
-	@#
-	@touch kinclude/linux/atomic.h
-	@touch kinclude/linux/backing-dev.h
-	@touch kinclude/linux/bitops.h
-	@touch kinclude/linux/blk-mq.h
-	@touch kinclude/linux/blkpg.h
-	@touch kinclude/linux/completion.h
-	@touch kinclude/linux/crypto.h
-	@touch kinclude/linux/dcache.h
-	@touch kinclude/linux/debugfs.h
-	@touch kinclude/linux/device.h
-	@touch kinclude/linux/dynamic_debug.h
-	@touch kinclude/linux/err.h
-	@touch kinclude/linux/file.h
-	@touch kinclude/linux/fs.h
-	@touch kinclude/linux/genhd.h
-	@touch kinclude/linux/genl_magic_func.h
-	@touch kinclude/linux/highmem.h
-	@touch kinclude/linux/idr.h
-	@touch kinclude/linux/jiffies.h
-	@touch kinclude/linux/kref.h
-	@touch kinclude/linux/lru_cache.h
-	@touch kinclude/linux/major.h
-	@touch kinclude/linux/memcontrol.h
-	@touch kinclude/linux/mm_inline.h
-	@touch kinclude/linux/net.h
-	@touch kinclude/linux/netlink.h
-	@touch kinclude/linux/notifier.h
-	@touch kinclude/linux/once.h
-	@touch kinclude/linux/prefetch.h
-	@touch kinclude/linux/random.h
-	@touch kinclude/linux/ratelimit.h
-	@touch kinclude/linux/rcupdate.h
-	@touch kinclude/linux/reboot.h
-	@touch kinclude/linux/sched.h
-	@touch kinclude/linux/security.h
-	@touch kinclude/linux/stat.h
-	@touch kinclude/linux/string.h
-	@touch kinclude/linux/stringify.h
-	@touch kinclude/linux/tcp.h
-	@#
-	@touch kinclude/kref_debug.h
-
-do_not_touch:
-	@# XXX We currently seem to get these from /usr/include
-	@# XXX This isn't right!
-	@#touch kinclude/asm/byteorder.h
-	@#touch kinclude/asm/types.h
-	@#touch kinclude/linux/errno.h
-	@#touch kinclude/linux/in.h
-	@#touch kinclude/linux/pkt_sched.h
-	@#touch kinclude/linux/socket.h
-	@#touch kinclude/linux/swab.h
-	@#touch kinclude/linux/types.h
-	@#touch kinclude/linux/unistd.h
+_include:
+	@echo Copy selected kernel header files for inclusion by apps building for usermode
+	@(cd $(REF_KERNEL)/arch; for d in `find x86   -type d`   ; do mkdir -p  $(DIR)/arch/$$d ; done)
+	@(cd $(REF_KERNEL)/arch; for f in `find x86 ! -type d,l` ; do touch     $(DIR)/arch/$$f ; done)
+	@(cd $(REF_KERNEL)/arch; for l in `find x86   -type l`   ; do cp -d $$l $(DIR)/arch/$$l ; done)
+	@
+	@(cd $(REF_KERNEL)/include; for d in `find   -type d`   ; do mkdir -p  $(DIR)/include/$$d ; done)
+	@(cd $(REF_KERNEL)/include; for f in `find ! -type d,l` ; do touch     $(DIR)/include/$$f ; done)
+	@(cd $(REF_KERNEL)/include; for l in `find   -type l`   ; do cp -d $$l $(DIR)/include/$$l ; done)
+	@
+	@
+	@ cp $(REF_KERNEL)/include/linux/byteorder/*.h		include/linux/byteorder/
+	@ cp $(REF_KERNEL)/include/linux/unaligned/*.h		include/linux/unaligned/
+	@
+	@ cp $(REF_KERNEL)/include/linux/kernel.h		include/linux/
+	@#cp $(REF_KERNEL)/include/linux/prefetch.h		include/linux/
+	@
+	@ cp $(REF_KERNEL)/include/linux/typecheck.h		include/linux/
+	@ cp $(REF_KERNEL)/include/linux/poison.h		include/linux/
+	@
+	@ cp $(REF_KERNEL)/include/linux/bitmap.h		include/linux/
+	@#cp $(REF_KERNEL)/include/linux/bitops.h		include/linux/
+	@#cp $(REF_KERNEL)/include/linux/bitrev.h		include/linux/
+	@#cp $(REF_KERNEL)/include/linux/cpumask.h		include/linux/
+	@#cp $(REF_KERNEL)/include/linux/ctype.h		include/linux/
+	@ cp $(REF_KERNEL)/include/linux/idr.h			include/linux/
+	@#cp $(REF_KERNEL)/include/linux/jiffies.h		include/linux/
+	@#cp $(REF_KERNEL)/include/linux/kobject.h		include/linux/
+	@#cp $(REF_KERNEL)/include/linux/kref.h			include/linux/
+	@ cp $(REF_KERNEL)/include/linux/ktime.h		include/linux/
+	@ cp $(REF_KERNEL)/include/linux/list.h			include/linux/
+	@#cp $(REF_KERNEL)/include/linux/log2.h			include/linux/
+	@#cp $(REF_KERNEL)/include/linux/parser.h		include/linux/
+	@#cp $(REF_KERNEL)/include/linux/plist.h		include/linux/
+	@#cp $(REF_KERNEL)/include/linux/prio_heap.h		include/linux/
+	@#cp $(REF_KERNEL)/include/linux/prio_tree.h		include/linux/
+	@#cp $(REF_KERNEL)/include/linux/proportions.h		include/linux/
+	@#cp $(REF_KERNEL)/include/linux/radix-tree.h		include/linux/
+	@#cp $(REF_KERNEL)/include/linux/ratelimit.h		include/linux/
+	@#cp $(REF_KERNEL)/include/linux/rational.h		include/linux/
+	@ cp $(REF_KERNEL)/include/linux/rbtree.h		include/linux/
+	@#cp $(REF_KERNEL)/include/linux/reciprocal_div.h	include/linux/
+	@#cp $(REF_KERNEL)/include/linux/sort.h			include/linux/
+	@#cp $(REF_KERNEL)/include/linux/uio.h			include/linux/
+	@
+	@#cp $(REF_KERNEL)/include/linux/blkdev.h		include/linux/
+	@#cp $(REF_KERNEL)/include/linux/rwsem.h		include/linux/
+	@#cp $(REF_KERNEL)/include/linux/rwsem-spinlock.h	include/linux/
+	@#cp $(REF_KERNEL)/include/linux/string.h		include/linux/
+	@#cp $(REF_KERNEL)/include/linux/time.h			include/linux/
+	@#cp $(REF_KERNEL)/include/linux/timer.h		include/linux/
+	@
+	@#cp $(REF_KERNEL)/include/linux/crc16.h		include/linux/
+	@#cp $(REF_KERNEL)/include/linux/crc32.h		include/linux/
+	@#cp $(REF_KERNEL)/include/linux/crc7.h			include/linux/
+	@#cp $(REF_KERNEL)/include/linux/crc-ccitt.h		include/linux/
+	@#cp $(REF_KERNEL)/include/linux/crc-itu-t.h		include/linux/
+	@#cp $(REF_KERNEL)/include/linux/crc-t10dif.h		include/linux/
+	@
+	@ cp $(REF_KERNEL)/include/linux/inet.h			include/linux/
+	@ cp $(REF_KERNEL)/include/linux/in.h			include/linux/
+	@ cp $(REF_KERNEL)/include/linux/in6.h			include/linux/
+	@#cp $(REF_KERNEL)/include/linux/net.h			include/linux/
+	@ cp $(REF_KERNEL)/include/linux/skbuff.h		include/linux/
+	@#cp $(REF_KERNEL)/include/linux/tcp.h			include/linux/
+	@
+	@ cp $(REF_KERNEL)/include/linux/genetlink.h		include/linux/
+	@ cp $(REF_KERNEL)/include/linux/netlink.h		include/linux/
+	@
+	@ cp $(REF_KERNEL)/include/net/genetlink.h		include/net/
+	@ cp $(REF_KERNEL)/include/net/netlink.h		include/net/
+	@
+	@#cp $(REF_KERNEL)/include/config/libcrc32c.h		include/config/
+	@#cp $(REF_KERNEL)/include/config/nlattr.h		include/config/
+	@#cp $(REF_KERNEL)/include/config/crypto/sha1.h		include/config/
+	@
+	@ cp $(REF_KERNEL)/include/scsi/scsi_cmnd.h		include/scsi/
+	@ cp $(REF_KERNEL)/include/scsi/scsi_eh.h		include/scsi/
+	@ cp $(REF_KERNEL)/include/scsi/scsi.h			include/scsi/
+	@
+	@
+	@#cp $(REF_KERNEL)/include/linux/kmemcheck.h		include/linux/
+	@#cp $(REF_KERNEL)/include/linux/rwsem.h		include/linux/
+	@#cp $(REF_KERNEL)/include/linux/spinlock.h		include/linux/
+	@#cp $(REF_KERNEL)/include/linux/thread_info.h		include/linux/
+	@
+	@ cp $(REF_KERNEL)/arch/x86/include/asm/kmemcheck.h	arch/x86/include/asm/
+	@#cp $(REF_KERNEL)/arch/x86/include/asm/rwsem.h		arch/x86/include/asm/
+	@#cp $(REF_KERNEL)/arch/x86/include/asm/spinlock.h	arch/x86/include/asm/
+	@ cp $(REF_KERNEL)/arch/x86/include/asm/thread_info.h	arch/x86/include/asm/
+	@
+	@
+	@#cp $(REF_KERNEL)/include/linux/bitops.h		include/linux/
+	@#cp $(REF_KERNEL)/include/linux/bug.h			include/linux/
+	@ cp $(REF_KERNEL)/include/net/checksum.h		include/net/
+	@ cp $(REF_KERNEL)/include/linux/errno.h		include/linux/
+	@#cp $(REF_KERNEL)/include/linux/fcntl.h		include/linux/
+	@ cp $(REF_KERNEL)/include/linux/ioctl.h		include/linux/
+	@ cp $(REF_KERNEL)/include/linux/linkage.h		include/linux/
+	@ cp $(REF_KERNEL)/include/linux/posix_types.h		include/linux/
+	@#cp $(REF_KERNEL)/include/linux/scatterlist.h		include/linux/
+	@#cp $(REF_KERNEL)/include/linux/socket.h		include/linux/
+	@ cp $(REF_KERNEL)/include/linux/sockios.h		include/linux/
+	@ cp $(REF_KERNEL)/include/linux/swab.h			include/linux/
+	@ cp $(REF_KERNEL)/include/linux/types.h		include/linux/
+	@ cp $(REF_KERNEL)/include/linux/unistd.h		include/linux/
+	@
+	@ cp $(REF_KERNEL)/include/asm-generic/bitops.h		include/asm-generic/
+	@ cp $(REF_KERNEL)/include/asm-generic/bug.h		include/asm-generic/
+	@ cp $(REF_KERNEL)/include/asm-generic/checksum.h	include/asm-generic/
+	@ cp $(REF_KERNEL)/include/asm-generic/errno.h		include/asm-generic/
+	@ cp $(REF_KERNEL)/include/asm-generic/fcntl.h		include/asm-generic/
+	@ cp $(REF_KERNEL)/include/asm-generic/ioctl.h		include/asm-generic/
+	@ cp $(REF_KERNEL)/include/asm-generic/linkage.h	include/asm-generic/
+	@ cp $(REF_KERNEL)/include/asm-generic/posix_types.h	include/asm-generic/
+	@ cp $(REF_KERNEL)/include/asm-generic/scatterlist.h	include/asm-generic/
+	@ cp $(REF_KERNEL)/include/asm-generic/socket.h		include/asm-generic/
+	@ cp $(REF_KERNEL)/include/asm-generic/sockios.h	include/asm-generic/
+	@ cp $(REF_KERNEL)/include/asm-generic/swab.h		include/asm-generic/
+	@ cp $(REF_KERNEL)/include/asm-generic/types.h		include/asm-generic/
+	@ cp $(REF_KERNEL)/include/asm-generic/unistd.h		include/asm-generic/
+	@
+	@ cp $(REF_KERNEL)/arch/x86/include/asm/bitops.h	arch/x86/include/asm/
+	@ cp $(REF_KERNEL)/arch/x86/include/asm/bug.h		arch/x86/include/asm/
+	@ cp $(REF_KERNEL)/arch/x86/include/asm/checksum.h	arch/x86/include/asm/
+	@ cp $(REF_KERNEL)/arch/x86/include/asm/errno.h		arch/x86/include/asm/
+	@ cp $(REF_KERNEL)/arch/x86/include/asm/fcntl.h		arch/x86/include/asm/
+	@ cp $(REF_KERNEL)/arch/x86/include/asm/ioctl.h		arch/x86/include/asm/
+	@ cp $(REF_KERNEL)/arch/x86/include/asm/linkage.h	arch/x86/include/asm/
+	@ cp $(REF_KERNEL)/arch/x86/include/asm/posix_types.h	arch/x86/include/asm/
+	@ cp $(REF_KERNEL)/arch/x86/include/asm/scatterlist.h	arch/x86/include/asm/
+	@ cp $(REF_KERNEL)/arch/x86/include/asm/socket.h	arch/x86/include/asm/
+	@ cp $(REF_KERNEL)/arch/x86/include/asm/sockios.h	arch/x86/include/asm/
+	@ cp $(REF_KERNEL)/arch/x86/include/asm/swab.h		arch/x86/include/asm/
+	@ cp $(REF_KERNEL)/arch/x86/include/asm/types.h		arch/x86/include/asm/
+	@ cp $(REF_KERNEL)/arch/x86/include/asm/unistd.h	arch/x86/include/asm/
+	@
+	@
+	@#cp $(REF_KERNEL)/include/asm-generic/atomic-long.h	include/asm-generic/
+	@ cp $(REF_KERNEL)/include/asm-generic/errno-base.h	include/asm-generic/
+	@ cp $(REF_KERNEL)/include/asm-generic/int-ll64.h	include/asm-generic/
+	@ cp $(REF_KERNEL)/include/asm-generic/bitops/*.h	include/asm-generic/bitops/
+	@
+	@
+	@ cp $(REF_KERNEL)/include/asm-generic/atomic64.h	include/asm-generic/
+	@ cp $(REF_KERNEL)/include/asm-generic/cmpxchg.h	include/asm-generic/
+	@ cp $(REF_KERNEL)/include/asm-generic/div64.h		include/asm-generic/
+	@ cp $(REF_KERNEL)/include/asm-generic/local.h		include/asm-generic/
+	@ cp $(REF_KERNEL)/include/asm-generic/system.h		include/asm-generic/
+	@
+	@#cp $(REF_KERNEL)/arch/x86/include/asm/atomic_64.h	arch/x86/include/asm/
+	@ cp $(REF_KERNEL)/arch/x86/include/asm/cmpxchg.h	arch/x86/include/asm/
+	@ cp $(REF_KERNEL)/arch/x86/include/asm/div64.h		arch/x86/include/asm/
+	@#cp $(REF_KERNEL)/arch/x86/include/asm/local.h		arch/x86/include/asm/
+	@#cp $(REF_KERNEL)/arch/x86/include/asm/system.h	arch/x86/include/asm/
+	@
+	@
+	@#cp $(REF_KERNEL)/arch/x86/include/asm/atomic.h	arch/x86/include/asm/
+	@ cp $(REF_KERNEL)/arch/x86/include/asm/byteorder.h	arch/x86/include/asm/
+	@ cp $(REF_KERNEL)/arch/x86/include/asm/checksum_64.h	arch/x86/include/asm/
+	@ cp $(REF_KERNEL)/arch/x86/include/asm/cmpxchg_64.h	arch/x86/include/asm/
+	@#cp $(REF_KERNEL)/arch/x86/include/asm/page.h		arch/x86/include/asm/
+	@ cp $(REF_KERNEL)/arch/x86/include/asm/posix_types_64.h arch/x86/include/asm/
+	@#cp $(REF_KERNEL)/arch/x86/include/asm/sync_bitops.h   arch/x86/include/asm/
+	@ cp $(REF_KERNEL)/arch/x86/include/asm/unaligned.h	arch/x86/include/asm/
+	@ cp $(REF_KERNEL)/arch/x86/include/asm/unistd_64.h	arch/x86/include/asm/ 
