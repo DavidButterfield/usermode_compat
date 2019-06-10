@@ -673,6 +673,7 @@ restart:
      * rv == 0       : "connection shut down by peer"
      */
     if (rc > 0) {
+#if 0
 	if ((size_t)rc < nbytes) {
 	    sys_warning("%s: received short read %ld/%lu on fd=%d flags=0x%x",
 			caller_id, rc, nbytes, sock->sk->fd, flags);
@@ -680,6 +681,7 @@ restart:
 	    // sys_notice("%s: received full read %ld/%lu on fd=%d flags=0x%x",
 	    //	    caller_id, rc, nbytes, sock->sk->fd, flags);
 	}
+#endif
 	/* Advance the msg by the number of bytes we received into it */
 	size_t skipbytes = rc;
 	while (skipbytes && skipbytes >= msg->msg_iov->iov_len) {
