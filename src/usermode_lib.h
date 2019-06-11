@@ -117,40 +117,6 @@
 #define BYTES_PER_LONG			8 //XXX (sizeof(long))
 #define BITS_PER_LONG			(BITS_PER_BYTE * BYTES_PER_LONG)
 
-/* The kernel implementation requires HZ to be fixed at compile-time */
-#define HZ				1000U
-
-/* Qualify a pointer so that its target is treated as volatile */
-#define _VOLATIZE(ptr)			((volatile const typeof(ptr))(ptr))
-#define WRITE_ONCE(x, val)		(*_VOLATIZE(&(x)) = (val))
-#define READ_ONCE(x)			(*_VOLATIZE(&(x)))
-#define	ACCESS_ONCE(x)			READ_ONCE(x)
-
-#define MODULE
-#define __must_check			__attribute__((__warn_unused_result__))
-#define __WARN()			printk(KERN_WARNING "WARNING: at %s\n", FL_STR);
-struct notifier_block;
-
-/* UMC_kernel.h should be included ahead of any kernel headers except linux/types.h */
-#include <linux/types.h>    /* first real header file to #include */
-#include "UMC_kernel.h"	    /* definitions from kernel .h files we don't #include */
-
-#include <sys/syscall.h>    /* ends up including a kernel header XXXX */
-
-#include <linux/swab.h>
-#include <linux/typecheck.h>
-#include <asm/atomic.h>
-#include <linux/list.h>
-
-#define kmemcheck_bitfield_begin(x)	/* */
-#define kmemcheck_bitfield_end(x)	/* */
-
-/********** Basic **********/
-
-/* Symbol construction */
-#define _CONCAT(a, b)                   __CONCAT__(a, b)
-#define __CONCAT__(a, b)                a##b
-
 /* Compiler hints */
 #define __pure				__attribute__((__pure__))
 #define __unused			__attribute__((__unused__))
@@ -172,9 +138,43 @@ struct notifier_block;
 
 #define uninitialized_var(x)		x = x
 
-#define _PER_THREAD			__thread
-
 #define offsetof(TYPE, MEMBER)		__builtin_offsetof(TYPE, MEMBER)
+
+/* The kernel implementation requires HZ to be fixed at compile-time */
+#define HZ				1000U
+
+/* Qualify a pointer so that its target is treated as volatile */
+#define _VOLATIZE(ptr)			((volatile const typeof(ptr))(ptr))
+#define WRITE_ONCE(x, val)		(*_VOLATIZE(&(x)) = (val))
+#define READ_ONCE(x)			(*_VOLATIZE(&(x)))
+#define	ACCESS_ONCE(x)			READ_ONCE(x)
+
+#define MODULE
+#define __WARN()			printk(KERN_WARNING "WARNING: at %s\n", FL_STR);
+struct notifier_block;
+
+/* UMC_kernel.h should be included ahead of any kernel headers except linux/types.h */
+#include <linux/types.h>    /* first real header file to #include */
+#include "UMC_kernel.h"	    /* definitions from kernel .h files we don't #include */
+
+#include <sys/syscall.h>    /* ends up including a kernel header XXXX */
+
+#include <linux/swab.h>
+#include <linux/typecheck.h>
+#include <asm/unaligned.h>
+#include <asm/atomic.h>
+#include <linux/list.h>
+
+#define kmemcheck_bitfield_begin(x)	/* */
+#define kmemcheck_bitfield_end(x)	/* */
+
+/********** Basic **********/
+
+/* Symbol construction */
+#define _CONCAT(a, b)                   __CONCAT__(a, b)
+#define __CONCAT__(a, b)                a##b
+
+#define _PER_THREAD			__thread
 
 /* Remove the "const" qualifier from a pointer --
 			    Places where this is needed should be fixed XXX */
@@ -3102,8 +3102,7 @@ filp_open_real(string_t name, int flags, umode_t mode)
 
     assert_imply(S_ISREG(statbuf.st_mode), statbuf.st_size == lseek_end_ofs);
 
-#ifdef USERMODE_AIO
-#warning USERMODE_AIO deprecated
+#if 0
 #define S_BLOCKIO_TYPE	S_IFBLK	    /* make block devices look like block devices */
 #else
 #define S_BLOCKIO_TYPE	S_IFREG	    /* make block devices look like files */
