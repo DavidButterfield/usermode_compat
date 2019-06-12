@@ -4,12 +4,14 @@
  *
  * Most of the shim code is in usermode_lib.h
  */
+#define _GNU_SOURCE 1
 #define NAME USERMODE_LIB
 
-#define NO_UMC_SOCKETS	    // inhibit usermode_lib ucred for one in sys/socket.h
 #include <sys/socket.h>
-#include "usermode_lib.h"   // must be after sys/socket.h, when NO_UMC_SOCKETS
-extern int sysinfo(struct sysinfo *);
+#include </usr/include/asm-generic/socket.h> //XXX sys/socket.h included the wrong asm/socket.h
+
+#define  NO_UMC_SOCKETS		// inhibit usermode_lib ucred for one in sys/socket.h
+#include "usermode_lib.h"	// must be after sys/socket.h, when NO_UMC_SOCKETS
 
 extern _PER_THREAD char sys_pthread_name[16];
 
@@ -91,18 +93,6 @@ strict_strtoll(const char * str, unsigned int base, long long * var)
 	return -errno;
     *var = val;
     return E_OK;
-}
-
-void
-si_meminfo(struct sysinfo *si)
-{
-    struct sysinfo si_space;
-    int rc = sysinfo(&si_space);
-    expect_rc(rc, sysinfo);
-    /* Kernel code appears to assume the unit is PAGE_SIZE */
-    unsigned int unit = si_space.mem_unit;
-    si->totalram = si_space.totalram * unit / PAGE_SIZE;
-    si->totalhigh = si_space.totalhigh * unit / PAGE_SIZE;
 }
 
 /******************************************************************************/
@@ -331,7 +321,7 @@ struct kobj_type device_ktype = {
 /******************************************************************************/
 /* net/core/skbuff.c */
 
-/* Note that the current head of the skb data is called "data" and it is the
+/* Note that the current head of valid skb data is called "data" and it is the
  * start of the buffer they call "head".  But "tail" is the end of the data.
  */
 
@@ -489,7 +479,7 @@ UMC_sock_connect(struct socket * sock, struct sockaddr * addr, socklen_t addrlen
     struct sockaddr_in * inaddr = (struct sockaddr_in *)addr;
     sys_notice("%s (%d) connecting socket fd=%d to %d.%d.%d.%d port %u",
 		current->comm, current->pid, sock->sk->fd,
-		NIPQUAD(inaddr->sin_addr), inaddr->sin_port);
+		NIPQUAD(inaddr->sin_addr), htons(inaddr->sin_port));
 
     error_t err = UMC_kernelize(connect(sock->sk->fd, addr, addrlen));
     if (!err) {
@@ -499,7 +489,7 @@ UMC_sock_connect(struct socket * sock, struct sockaddr * addr, socklen_t addrlen
 
     sys_notice("%s (%d) connected socket fd=%d to %d.%d.%d.%d port %u err=%d",
 		current->comm, current->pid, sock->sk->fd,
-		NIPQUAD(inaddr->sin_addr), inaddr->sin_port, err);
+		NIPQUAD(inaddr->sin_addr), htons(inaddr->sin_port), err);
     return err;
 }
 
@@ -520,12 +510,12 @@ UMC_sock_bind(struct socket * sock, struct sockaddr *addr, socklen_t addrlen)
 	if (err == E_OK) {
 	    sys_notice("%s (%d) binds socket fd=%d to %d.%d.%d.%d port %u",
 			current->comm, current->pid, sock->sk->fd,
-			NIPQUAD(inaddr->sin_addr), inaddr->sin_port);
+			NIPQUAD(inaddr->sin_addr), htons(inaddr->sin_port));
 	    UMC_sock_filladdrs(sock);
 	} else {
 	    sys_warning("%s (%d) ERROR %d binding fd=%d to %d.%d.%d.%d port %u",
-			current->comm, current->pid, sock->sk->fd,
-			err, NIPQUAD(inaddr->sin_addr), inaddr->sin_port);
+			current->comm, current->pid, err, sock->sk->fd,
+			NIPQUAD(inaddr->sin_addr), htons(inaddr->sin_port));
 	}
     }
 
@@ -637,7 +627,7 @@ _sock_recvmsg(struct socket * sock, struct msghdr * msg,
     }
     expect_eq(nbytes, msgbytes);
 #endif
-#if 1
+#if 1	/* receive timeouts */
     if (sock->sk->sk_rcvtimeo != sock->sk->UMC_rcvtimeo) {
 	/* somebody changed the receive timeout */
 	sock->sk->UMC_rcvtimeo = sock->sk->sk_rcvtimeo;
@@ -652,8 +642,10 @@ _sock_recvmsg(struct socket * sock, struct msghdr * msg,
 	    sys_warning("%s: fd=%d failed to set receive timeout to jiffies=%lu sec=%lu usec=%lu",
 		caller_id, sock->sk->fd, sock->sk->UMC_rcvtimeo, optval.tv_sec, optval.tv_usec);
 	} else {
-	    // sys_notice("%s: fd=%d changed receive timeout to jiffies=%lu sec=%lu usec=%lu",
-		// caller_id, sock->sk->fd, sock->sk->UMC_rcvtimeo, optval.tv_sec, optval.tv_usec);
+#ifdef TRACE_socket
+	    sys_notice("%s: fd=%d changed receive timeout to jiffies=%lu sec=%lu usec=%lu",
+		caller_id, sock->sk->fd, sock->sk->UMC_rcvtimeo, optval.tv_sec, optval.tv_usec);
+#endif
 	}
     }
 #endif
@@ -673,7 +665,7 @@ restart:
      * rv == 0       : "connection shut down by peer"
      */
     if (rc > 0) {
-#if 0
+#ifdef TRACE_socket
 	if ((size_t)rc < nbytes) {
 	    sys_warning("%s: received short read %ld/%lu on fd=%d flags=0x%x",
 			caller_id, rc, nbytes, sock->sk->fd, flags);
@@ -706,7 +698,9 @@ restart:
 	} else if (rc == -EAGAIN) {
 	    if (!(flags & MSG_DONTWAIT)) {  //XXXX probably SO_NONBLOCK too
 		if (sock->sk->UMC_rcvtimeo == 0 || sock->sk->UMC_rcvtimeo >= JIFFY_MAX) {
-		    // sys_notice("%s: recvmsg ignores -EAGAIN on fd=%d flags=0x%x", caller_id, (sock)->sk->fd, flags);
+#ifdef TRACE_socket
+		    sys_notice("%s: recvmsg ignores -EAGAIN on fd=%d flags=0x%x", caller_id, (sock)->sk->fd, flags);
+#endif
 		    usleep(100);	    //XXXXX
 		    goto restart;   //XXX doesn't adjust time remaining
 		}
@@ -717,8 +711,10 @@ restart:
 		    usleep(100);	    //XXXXX
 		    goto restart;   //XXX doesn't adjust time remaining
 		}
-		// sys_notice("%s: recvmsg returns -EAGAIN on fd=%d timeout=%lu jiffies flags=0x%x",
-			    // caller_id, sock->sk->fd, sock->sk->sk_rcvtimeo, flags);
+#ifdef TRACE_socket
+		sys_notice("%s: recvmsg returns -EAGAIN on fd=%d timeout=%lu jiffies flags=0x%x",
+			    caller_id, sock->sk->fd, sock->sk->sk_rcvtimeo, flags);
+#endif
 	    } else {
 		// sys_notice("%s: recvmsg(MSG_DONTWAIT) returns -EAGAIN on fd=%d timeout=%lu jiffies flags=0x%x",
 			    // caller_id, sock->sk->fd, sock->sk->sk_rcvtimeo, flags);
@@ -763,7 +759,7 @@ UMC_sock_xmit_event(void * env, uintptr_t events, error_t err)
 
     if (unlikely(events & SYS_SOCKET_ERR)) {
 	if (events & (EPOLLHUP | EPOLLERR)) {
-	    sock->sk->sk_state &= ~TCP_ESTABLISHED;	//XXX right?
+	    sock->sk->sk_state &= ~TCP_ESTABLISHED;
 	}
 	sock->sk->sk_state_change(sock->sk);
     }
@@ -784,7 +780,7 @@ UMC_sock_recv_event(void * env, uintptr_t events, error_t err)
 
     if (unlikely(events & SYS_SOCKET_ERR)) {
 	if (events & (EPOLLHUP | EPOLLERR)) {
-	    sock->sk->sk_state &= ~TCP_ESTABLISHED;	//XXX right?
+	    sock->sk->sk_state &= ~TCP_ESTABLISHED;
 	}
 	sock->sk->sk_state_change(sock->sk);
     }
@@ -810,7 +806,7 @@ on_netlink_error(struct sock * sk)
 error_t
 netlink_xmit(struct sock *sk, struct sk_buff *skb, uint32_t pid, uint32_t group, int nonblock)
 {
-    // XXX there is no logic to support xmit-ready callbacks, so always do synchronous
+    // XXX there is no logic here to support xmit-ready callbacks, so always do synchronous
     // int flags = MSG_NOSIGNAL | (nonblock ? MSG_DONTWAIT : 0);
     struct sockaddr_in dst_addr = {
 	.sin_family = AF_INET,
@@ -870,7 +866,7 @@ netlink_dump(struct sock *sk)
 
 	len = cb->dump(skb, cb);
 
-#if 0
+#if 0	//XXX
 	// Someone is supposed to call this function repeatedly...
 	if (len > 0) {
 		mutex_unlock(nlk->cb_mutex);
@@ -994,7 +990,6 @@ on_netlink_recv(struct sock * sk, int len)
     verify_le(skb->tail, skb->end);
 
     NETLINK_CB(skb).pid = ntohs(src_addr.sin_port);
-    // NETLINK_CB(skb).sk = sk;
 
     sk->netlink_rcv(skb);
 }
@@ -1014,7 +1009,7 @@ establish_netlink(void)
 
     struct sockaddr_in addr = {
 	.sin_family = AF_INET,
-	.sin_addr = { htonl(0x7f000001) },	//127.0.0.1
+	.sin_addr = { htonl(0x7f000001) },	/* 127.0.0.1 */
 	.sin_port = htons(UMC_NETLINK_PORT),
 	.sin_zero = { 0 }
     };
@@ -1034,7 +1029,7 @@ establish_netlink(void)
 
 	struct file * file = _fget(fd);
 	if (!file) {
-	    sys_warning("could not allocate file for netlink listener");
+	    sys_warning("could not allocate file for netlink socket");
 	    close(fd);
 	    return;
 	}
@@ -1059,6 +1054,12 @@ establish_netlink(void)
 }
 
 /******************************************************************************/
+
+void
+dump_stack(void)
+{
+    sys_backtrace("kernel-code call to dump_stack()");
+}
 
 /* A real signal */
 static void
@@ -1172,50 +1173,46 @@ UMC_exit(void)
 
 /******************************************************************************/
 
-#include "UMC_genl.c"
-#include "../../linux-2.6.32.27/lib/bitmap.c"
-#include "../../linux-2.6.32.27/lib/rbtree.c"
-#include "../../linux-2.6.32.27/lib/idr.c"
-#include "../../linux-2.6.32.27/lib/nlattr.c"
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27)
 
-#if 0
-atomic64.c
-bitrev.c
-checksum.c
-cpumask.c
-crc16.c
-crc32.c
-crc32defs.h
-crc7.c
-crc-ccitt.c
-crc-itu-t.c
-crc-t10dif.c
-ctype.c
-dec_and_lock.c
-div64.c
-find_last_bit.c
-find_next_bit.c
-gen_crc32table.c
-hweight.c
-kasprintf.c
-kobject.c
-kref.c
-libcrc32c.c
-parser.c
-plist.c
-prio_heap.c
-prio_tree.c
-proportions.c
-radix-tree.c
-random32.c
-ratelimit.c
-rational.c
-reciprocal_div.c
-rwsem.c
-rwsem-spinlock.c
-scatterlist.c
-sha1.c
-skbuff.c
-sort.c
-vsprintf.c
+int
+__ratelimit(struct ratelimit_state *rs)
+{
+    return 1;	    /* no ratelimit */
+}
+
 #endif
+
+extern int sysinfo(struct sysinfo *);
+
+void
+si_meminfo(struct sysinfo *si)
+{
+    struct sysinfo si_space;
+    int rc = sysinfo(&si_space);
+    expect_rc(rc, sysinfo);
+    /* Kernel code appears to assume the unit is PAGE_SIZE */
+    unsigned int unit = si_space.mem_unit;
+    si->totalram = si_space.totalram * unit / PAGE_SIZE;
+    si->totalhigh = si_space.totalhigh * unit / PAGE_SIZE;
+}
+
+#include <sys/resource.h>
+
+error_t
+UMC_sched_setscheduler(struct task_struct * task, int policy, struct sched_param * param)
+{
+//XXX He probably wants the realtime scheduler, but not happening today
+//  return UMC_kernelize(sched_setscheduler(task->pid, policy, param));
+    // nice him up instead
+    setpriority(PRIO_PROCESS, task->pid, param->sched_priority > 0 ? -20 : 0);
+    return E_OK;
+}
+
+#include "UMC_genl.c"
+
+#include "klib/bitmap.c"
+#include "klib/idr.c"
+// #include "klib/libcrc32c.c"
+#include "klib/nlattr.c"
+#include "klib/rbtree.c"

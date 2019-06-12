@@ -10,24 +10,12 @@
  *
  * UMC_fuse_start, UMC_fuse_stop, and UMC_fuse_exit initialize and/or free resources.
  */
-#include <sys/types.h>
-#include <inttypes.h>
-#include <stdint.h>
-#include <unistd.h>
-#include <errno.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
-#include <fcntl.h>
-#include <sys/stat.h>
+#define NAME UMC_FUSE
+#include "usermode_lib.h"
 
 #define FUSE_USE_VERSION 26
 #define _FILE_OFFSET_BITS 64	/* fuse seems to want this even on 64-bit */
 #include <fuse.h>
-
-#define NAME UMC_FUSE
-#include "usermode_lib.h"
-#include "sys_debug.h"
 
 /* These first functions operate on some particular node in the PDE (proc_dir_entry) tree */
 

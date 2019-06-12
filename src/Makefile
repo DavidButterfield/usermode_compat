@@ -88,7 +88,7 @@ all:	check_include check_MTE
 	$(MAKE) $(OBJS_D)
 
 check_include:
-	@if [[ ! -d include ]] ; then $(MAKE) include; fi
+	@if [[ ! -d include ]] ; then $(MAKE) kcopy; fi
 
 ifndef MTELIB_H
 check_MTE:
@@ -117,13 +117,13 @@ clean:
 
 extraclean: clean
 	rm -f *.orig *.rej
-	rm -rf include arch
+	rm -rf include arch klib
 
 cscope:
 	@cscope -b -c -R
 	@ctags        -R
 
-.PHONY:	all include check_MTE check_include cscope
+.PHONY:	all kcopy _lib _include check_MTE check_include cscope
 
 #########################################################################
 
@@ -134,16 +134,30 @@ cscope:
 
 DIR := $(shell /bin/pwd)
 
-include:   _include
-	@echo Modified header files:
-	cp kincl_mod/netlink.h	    include/net/
-	cp kincl_mod/kernel.h	    include/linux/
-	cp kincl_mod/types.h	    include/linux/
-	touch			    include/linux/version.h
-	touch			    include/linux/export.h
-	touch			    include/linux/autoconf.h
+kcopy:	_include _klib
+	@# These have been modified from the 2.6.32 reference kernel
+	@ cp kincl_mod/netlink.h	    include/net/
+	@ cp kincl_mod/kernel.h	    include/linux/
+	@ cp kincl_mod/types.h	    include/linux/
+	@# These don't exist unless you have built the reference kernel
+	@ touch			    include/linux/version.h
+	@ touch			    include/linux/export.h
+	@ touch			    include/linux/autoconf.h
+
+_klib:
+	@# Get some .c files from the reference kernel
+	@ mkdir -p klib
+	@ cp $(REF_KERNEL)/lib/bitmap.c				klib
+	@ cp $(REF_KERNEL)/lib/idr.c				klib
+	@#cp $(REF_KERNEL)/lib/libcrc32c.c			klib
+	@ cp $(REF_KERNEL)/lib/nlattr.c				klib
+	@ cp $(REF_KERNEL)/lib/rbtree.c				klib
+
+# The ones that are commented out will require more work than simply uncommenting them!
+# They have never been tried nor had their depedencies determined
 
 _include:
+	@# Get some .h files from the reference kernel
 	@echo Copy selected kernel header files for inclusion by apps building for usermode
 	@(cd $(REF_KERNEL)/arch; for d in `find x86   -type d`   ; do mkdir -p  $(DIR)/arch/$$d ; done)
 	@(cd $(REF_KERNEL)/arch; for f in `find x86 ! -type d,l` ; do touch     $(DIR)/arch/$$f ; done)
@@ -158,55 +172,62 @@ _include:
 	@ cp $(REF_KERNEL)/include/linux/unaligned/*.h		include/linux/unaligned/
 	@
 	@ cp $(REF_KERNEL)/include/linux/kernel.h		include/linux/
-	@#cp $(REF_KERNEL)/include/linux/prefetch.h		include/linux/
-	@
+	@		    #included by linux/kernel.h
+	@ cp $(REF_KERNEL)/arch/x86/include/asm/bitops.h	arch/x86/include/asm/
+	@ cp $(REF_KERNEL)/arch/x86/include/asm/bug.h		arch/x86/include/asm/
+	@ cp $(REF_KERNEL)/arch/x86/include/asm/byteorder.h	arch/x86/include/asm/
+	@ cp $(REF_KERNEL)/arch/x86/include/asm/div64.h		arch/x86/include/asm/
+	@ cp $(REF_KERNEL)/arch/x86/include/asm/linkage.h	arch/x86/include/asm/
+	@ cp $(REF_KERNEL)/arch/x86/include/asm/types.h		arch/x86/include/asm/
+	@ cp $(REF_KERNEL)/include/asm-generic/bitops.h		include/asm-generic/
+	@ cp $(REF_KERNEL)/include/asm-generic/bug.h		include/asm-generic/
+	@ cp $(REF_KERNEL)/include/asm-generic/div64.h		include/asm-generic/
+	@ cp $(REF_KERNEL)/include/asm-generic/linkage.h	include/asm-generic/
+	@ cp $(REF_KERNEL)/include/asm-generic/types.h		include/asm-generic/
+	@ cp $(REF_KERNEL)/include/linux/bitops.h		include/linux/
+	@ cp $(REF_KERNEL)/include/linux/bug.h			include/linux/
+	@ cp $(REF_KERNEL)/include/linux/linkage.h		include/linux/
+	@ cp $(REF_KERNEL)/include/linux/log2.h			include/linux/
+	@ cp $(REF_KERNEL)/include/linux/ratelimit.h		include/linux/
 	@ cp $(REF_KERNEL)/include/linux/typecheck.h		include/linux/
-	@ cp $(REF_KERNEL)/include/linux/poison.h		include/linux/
+	@ cp $(REF_KERNEL)/include/linux/types.h		include/linux/
+	@
 	@
 	@ cp $(REF_KERNEL)/include/linux/bitmap.h		include/linux/
-	@#cp $(REF_KERNEL)/include/linux/bitops.h		include/linux/
-	@#cp $(REF_KERNEL)/include/linux/bitrev.h		include/linux/
-	@#cp $(REF_KERNEL)/include/linux/cpumask.h		include/linux/
-	@#cp $(REF_KERNEL)/include/linux/ctype.h		include/linux/
+	@ cp $(REF_KERNEL)/include/linux/cache.h		include/linux/
+	@#cp $(REF_KERNEL)/include/linux/crc32c.h		include/linux/
 	@ cp $(REF_KERNEL)/include/linux/idr.h			include/linux/
-	@#cp $(REF_KERNEL)/include/linux/jiffies.h		include/linux/
-	@#cp $(REF_KERNEL)/include/linux/kobject.h		include/linux/
-	@#cp $(REF_KERNEL)/include/linux/kref.h			include/linux/
 	@ cp $(REF_KERNEL)/include/linux/ktime.h		include/linux/
 	@ cp $(REF_KERNEL)/include/linux/list.h			include/linux/
-	@#cp $(REF_KERNEL)/include/linux/log2.h			include/linux/
+	@ cp $(REF_KERNEL)/include/linux/poison.h		include/linux/
+	@ cp $(REF_KERNEL)/include/linux/prefetch.h		include/linux/
+	@ cp $(REF_KERNEL)/include/linux/rbtree.h		include/linux/
+	@
+	@#cp $(REF_KERNEL)/include/linux/bitrev.h		include/linux/
+	@#cp $(REF_KERNEL)/include/linux/blkdev.h		include/linux/
+	@#cp $(REF_KERNEL)/include/linux/cpumask.h		include/linux/
+	@#cp $(REF_KERNEL)/include/linux/ctype.h		include/linux/
+	@#cp $(REF_KERNEL)/include/linux/inet.h			include/linux/
+	@#cp $(REF_KERNEL)/include/linux/kobject.h		include/linux/
+	@#cp $(REF_KERNEL)/include/linux/kref.h			include/linux/
 	@#cp $(REF_KERNEL)/include/linux/parser.h		include/linux/
 	@#cp $(REF_KERNEL)/include/linux/plist.h		include/linux/
 	@#cp $(REF_KERNEL)/include/linux/prio_heap.h		include/linux/
 	@#cp $(REF_KERNEL)/include/linux/prio_tree.h		include/linux/
 	@#cp $(REF_KERNEL)/include/linux/proportions.h		include/linux/
 	@#cp $(REF_KERNEL)/include/linux/radix-tree.h		include/linux/
-	@#cp $(REF_KERNEL)/include/linux/ratelimit.h		include/linux/
 	@#cp $(REF_KERNEL)/include/linux/rational.h		include/linux/
-	@ cp $(REF_KERNEL)/include/linux/rbtree.h		include/linux/
 	@#cp $(REF_KERNEL)/include/linux/reciprocal_div.h	include/linux/
-	@#cp $(REF_KERNEL)/include/linux/sort.h			include/linux/
-	@#cp $(REF_KERNEL)/include/linux/uio.h			include/linux/
-	@
-	@#cp $(REF_KERNEL)/include/linux/blkdev.h		include/linux/
 	@#cp $(REF_KERNEL)/include/linux/rwsem.h		include/linux/
 	@#cp $(REF_KERNEL)/include/linux/rwsem-spinlock.h	include/linux/
-	@#cp $(REF_KERNEL)/include/linux/string.h		include/linux/
+	@#cp $(REF_KERNEL)/include/linux/sort.h			include/linux/
 	@#cp $(REF_KERNEL)/include/linux/time.h			include/linux/
-	@#cp $(REF_KERNEL)/include/linux/timer.h		include/linux/
 	@
-	@#cp $(REF_KERNEL)/include/linux/crc16.h		include/linux/
-	@#cp $(REF_KERNEL)/include/linux/crc32.h		include/linux/
-	@#cp $(REF_KERNEL)/include/linux/crc7.h			include/linux/
-	@#cp $(REF_KERNEL)/include/linux/crc-ccitt.h		include/linux/
-	@#cp $(REF_KERNEL)/include/linux/crc-itu-t.h		include/linux/
-	@#cp $(REF_KERNEL)/include/linux/crc-t10dif.h		include/linux/
 	@
-	@ cp $(REF_KERNEL)/include/linux/inet.h			include/linux/
 	@ cp $(REF_KERNEL)/include/linux/in.h			include/linux/
 	@ cp $(REF_KERNEL)/include/linux/in6.h			include/linux/
-	@#cp $(REF_KERNEL)/include/linux/net.h			include/linux/
 	@ cp $(REF_KERNEL)/include/linux/skbuff.h		include/linux/
+	@#cp $(REF_KERNEL)/include/linux/net.h			include/linux/
 	@#cp $(REF_KERNEL)/include/linux/tcp.h			include/linux/
 	@
 	@ cp $(REF_KERNEL)/include/linux/genetlink.h		include/linux/
@@ -215,73 +236,54 @@ _include:
 	@ cp $(REF_KERNEL)/include/net/genetlink.h		include/net/
 	@ cp $(REF_KERNEL)/include/net/netlink.h		include/net/
 	@
-	@#cp $(REF_KERNEL)/include/config/libcrc32c.h		include/config/
-	@#cp $(REF_KERNEL)/include/config/nlattr.h		include/config/
-	@#cp $(REF_KERNEL)/include/config/crypto/sha1.h		include/config/
+	@#cp $(REF_KERNEL)/include/crypto/hash.h		include/crypto/
 	@
 	@ cp $(REF_KERNEL)/include/scsi/scsi_cmnd.h		include/scsi/
 	@ cp $(REF_KERNEL)/include/scsi/scsi_eh.h		include/scsi/
 	@ cp $(REF_KERNEL)/include/scsi/scsi.h			include/scsi/
 	@
 	@
-	@#cp $(REF_KERNEL)/include/linux/kmemcheck.h		include/linux/
+	@ cp $(REF_KERNEL)/include/linux/kmemcheck.h		include/linux/
 	@#cp $(REF_KERNEL)/include/linux/rwsem.h		include/linux/
 	@#cp $(REF_KERNEL)/include/linux/spinlock.h		include/linux/
-	@#cp $(REF_KERNEL)/include/linux/thread_info.h		include/linux/
 	@
 	@ cp $(REF_KERNEL)/arch/x86/include/asm/kmemcheck.h	arch/x86/include/asm/
 	@#cp $(REF_KERNEL)/arch/x86/include/asm/rwsem.h		arch/x86/include/asm/
 	@#cp $(REF_KERNEL)/arch/x86/include/asm/spinlock.h	arch/x86/include/asm/
-	@ cp $(REF_KERNEL)/arch/x86/include/asm/thread_info.h	arch/x86/include/asm/
 	@
 	@
-	@#cp $(REF_KERNEL)/include/linux/bitops.h		include/linux/
-	@#cp $(REF_KERNEL)/include/linux/bug.h			include/linux/
 	@ cp $(REF_KERNEL)/include/net/checksum.h		include/net/
 	@ cp $(REF_KERNEL)/include/linux/errno.h		include/linux/
-	@#cp $(REF_KERNEL)/include/linux/fcntl.h		include/linux/
 	@ cp $(REF_KERNEL)/include/linux/ioctl.h		include/linux/
-	@ cp $(REF_KERNEL)/include/linux/linkage.h		include/linux/
 	@ cp $(REF_KERNEL)/include/linux/posix_types.h		include/linux/
 	@#cp $(REF_KERNEL)/include/linux/scatterlist.h		include/linux/
 	@#cp $(REF_KERNEL)/include/linux/socket.h		include/linux/
 	@ cp $(REF_KERNEL)/include/linux/sockios.h		include/linux/
 	@ cp $(REF_KERNEL)/include/linux/swab.h			include/linux/
-	@ cp $(REF_KERNEL)/include/linux/types.h		include/linux/
-	@ cp $(REF_KERNEL)/include/linux/unistd.h		include/linux/
+	@#cp $(REF_KERNEL)/include/linux/unistd.h		include/linux/
 	@
-	@ cp $(REF_KERNEL)/include/asm-generic/bitops.h		include/asm-generic/
-	@ cp $(REF_KERNEL)/include/asm-generic/bug.h		include/asm-generic/
 	@ cp $(REF_KERNEL)/include/asm-generic/checksum.h	include/asm-generic/
 	@ cp $(REF_KERNEL)/include/asm-generic/errno.h		include/asm-generic/
-	@ cp $(REF_KERNEL)/include/asm-generic/fcntl.h		include/asm-generic/
 	@ cp $(REF_KERNEL)/include/asm-generic/ioctl.h		include/asm-generic/
-	@ cp $(REF_KERNEL)/include/asm-generic/linkage.h	include/asm-generic/
 	@ cp $(REF_KERNEL)/include/asm-generic/posix_types.h	include/asm-generic/
-	@ cp $(REF_KERNEL)/include/asm-generic/scatterlist.h	include/asm-generic/
-	@ cp $(REF_KERNEL)/include/asm-generic/socket.h		include/asm-generic/
+	@#cp $(REF_KERNEL)/include/asm-generic/scatterlist.h	include/asm-generic/
+	@#cp $(REF_KERNEL)/include/asm-generic/socket.h		include/asm-generic/
 	@ cp $(REF_KERNEL)/include/asm-generic/sockios.h	include/asm-generic/
 	@ cp $(REF_KERNEL)/include/asm-generic/swab.h		include/asm-generic/
-	@ cp $(REF_KERNEL)/include/asm-generic/types.h		include/asm-generic/
 	@ cp $(REF_KERNEL)/include/asm-generic/unistd.h		include/asm-generic/
 	@
-	@ cp $(REF_KERNEL)/arch/x86/include/asm/bitops.h	arch/x86/include/asm/
-	@ cp $(REF_KERNEL)/arch/x86/include/asm/bug.h		arch/x86/include/asm/
 	@ cp $(REF_KERNEL)/arch/x86/include/asm/checksum.h	arch/x86/include/asm/
 	@ cp $(REF_KERNEL)/arch/x86/include/asm/errno.h		arch/x86/include/asm/
-	@ cp $(REF_KERNEL)/arch/x86/include/asm/fcntl.h		arch/x86/include/asm/
 	@ cp $(REF_KERNEL)/arch/x86/include/asm/ioctl.h		arch/x86/include/asm/
-	@ cp $(REF_KERNEL)/arch/x86/include/asm/linkage.h	arch/x86/include/asm/
 	@ cp $(REF_KERNEL)/arch/x86/include/asm/posix_types.h	arch/x86/include/asm/
-	@ cp $(REF_KERNEL)/arch/x86/include/asm/scatterlist.h	arch/x86/include/asm/
-	@ cp $(REF_KERNEL)/arch/x86/include/asm/socket.h	arch/x86/include/asm/
+	@#cp $(REF_KERNEL)/arch/x86/include/asm/scatterlist.h	arch/x86/include/asm/
+	@#cp $(REF_KERNEL)/arch/x86/include/asm/socket.h	arch/x86/include/asm/
 	@ cp $(REF_KERNEL)/arch/x86/include/asm/sockios.h	arch/x86/include/asm/
 	@ cp $(REF_KERNEL)/arch/x86/include/asm/swab.h		arch/x86/include/asm/
-	@ cp $(REF_KERNEL)/arch/x86/include/asm/types.h		arch/x86/include/asm/
 	@ cp $(REF_KERNEL)/arch/x86/include/asm/unistd.h	arch/x86/include/asm/
 	@
 	@
-	@#cp $(REF_KERNEL)/include/asm-generic/atomic-long.h	include/asm-generic/
+	@ cp $(REF_KERNEL)/include/asm-generic/atomic-long.h	include/asm-generic/
 	@ cp $(REF_KERNEL)/include/asm-generic/errno-base.h	include/asm-generic/
 	@ cp $(REF_KERNEL)/include/asm-generic/int-ll64.h	include/asm-generic/
 	@ cp $(REF_KERNEL)/include/asm-generic/bitops/*.h	include/asm-generic/bitops/
@@ -289,23 +291,18 @@ _include:
 	@
 	@ cp $(REF_KERNEL)/include/asm-generic/atomic64.h	include/asm-generic/
 	@ cp $(REF_KERNEL)/include/asm-generic/cmpxchg.h	include/asm-generic/
-	@ cp $(REF_KERNEL)/include/asm-generic/div64.h		include/asm-generic/
-	@ cp $(REF_KERNEL)/include/asm-generic/local.h		include/asm-generic/
-	@ cp $(REF_KERNEL)/include/asm-generic/system.h		include/asm-generic/
 	@
-	@#cp $(REF_KERNEL)/arch/x86/include/asm/atomic_64.h	arch/x86/include/asm/
+	@ cp $(REF_KERNEL)/arch/x86/include/asm/atomic_64.h	arch/x86/include/asm/
 	@ cp $(REF_KERNEL)/arch/x86/include/asm/cmpxchg.h	arch/x86/include/asm/
-	@ cp $(REF_KERNEL)/arch/x86/include/asm/div64.h		arch/x86/include/asm/
-	@#cp $(REF_KERNEL)/arch/x86/include/asm/local.h		arch/x86/include/asm/
-	@#cp $(REF_KERNEL)/arch/x86/include/asm/system.h	arch/x86/include/asm/
 	@
 	@
 	@#cp $(REF_KERNEL)/arch/x86/include/asm/atomic.h	arch/x86/include/asm/
-	@ cp $(REF_KERNEL)/arch/x86/include/asm/byteorder.h	arch/x86/include/asm/
+	@ cp $(REF_KERNEL)/arch/x86/include/asm/bitsperlong.h	arch/x86/include/asm/
 	@ cp $(REF_KERNEL)/arch/x86/include/asm/checksum_64.h	arch/x86/include/asm/
 	@ cp $(REF_KERNEL)/arch/x86/include/asm/cmpxchg_64.h	arch/x86/include/asm/
-	@#cp $(REF_KERNEL)/arch/x86/include/asm/page.h		arch/x86/include/asm/
 	@ cp $(REF_KERNEL)/arch/x86/include/asm/posix_types_64.h arch/x86/include/asm/
-	@#cp $(REF_KERNEL)/arch/x86/include/asm/sync_bitops.h   arch/x86/include/asm/
+	@ cp $(REF_KERNEL)/arch/x86/include/asm/sync_bitops.h   arch/x86/include/asm/
 	@ cp $(REF_KERNEL)/arch/x86/include/asm/unaligned.h	arch/x86/include/asm/
 	@ cp $(REF_KERNEL)/arch/x86/include/asm/unistd_64.h	arch/x86/include/asm/ 
+	@ cp $(REF_KERNEL)/arch/x86/include/asm/alternative.h	arch/x86/include/asm/ 
+	@ cp $(REF_KERNEL)/arch/x86/include/asm/asm.h		arch/x86/include/asm/ 

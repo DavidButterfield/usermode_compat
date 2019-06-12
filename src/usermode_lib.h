@@ -2,48 +2,62 @@
  * Shim for partial emulation/stubbing of selected Linux kernel functions in usermode
  * Copyright 2015 - 2019 David A. Butterfield
  *
- * This is not intended to be #included from code that was written to run in usermode
+ * This file is not intended to be #included from code that was written to run in usermode.
  *
  * Note that the functions here are implemented around the (apparent) semantics required by
  * particular kernel code of interest -- so they are not likely to conform to the full behavior
- * of the originals, which in most cases have not been consulted to validate these (XXX TODO)
+ * of the originals, which in many instances have not been consulted to validate these.  TODO
  */
 #ifndef USERMODE_LIB_H
 #define USERMODE_LIB_H
 #define _GNU_SOURCE 1
 
+/* This file is automatically included from all the "application code" (kernel code ported to
+ * run in usermode) source files.  This file #includes some header files from /usr/include and
+ * some header files from the reference kernel.  Some care is required to avoid conflicts.
+ * Such header file conflicts can be very confusing, and slow to understand, because all your
+ * usual assumptions about library interface consistency have to be checked.
+ */
+
 #ifndef __x86_64__
 #warning usermode_lib shim has been compiled on 64-bit x86 only -- work required for other arch
 #endif
 
-/* These come from /usr/include */
+/* Some headers in /usr/include depend on the usermode endian conventions, while some kernel
+ * header files depend on the kernel endian conventions.  #include all the former before fixing
+ * up the endian indicators below; and #include all the latter after the fixup.
+ */
+
+#define _ASM_GENERIC_BITOPS_HWEIGHT_H_	    /* inhibit hweight.h */
+
+/* These headers come from /usr/include */
 #include <sys/types.h>
 #include <inttypes.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <limits.h>
 #include <errno.h>
-
-#include <unistd.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <stdarg.h>
-
-#include <search.h>
-#include <string.h>
 #include <ctype.h>
 
-#include <limits.h>
-#include <sys/resource.h>
+#define ffs UMC_unused_ffs	    /* evade defining function ffs in string.h */
+#include <string.h>
+#undef ffs
 
-#include <sys/uio.h>
 #include <sys/stat.h>
-#include <sys/ioctl.h>
 #include <fcntl.h>
-
-#include <sched.h>
-#include <pthread.h>
-#include <sys/wait.h>
 #include <semaphore.h>
+#include <pthread.h>
+
+/* From /usr/include sys/wait.h */
+extern __pid_t waitpid (__pid_t __pid, int *__stat_loc, int __options);
+
+/* From /usr/include sys/uio.h */
+#define _SYS_UIO_H
+struct iovec;
+extern ssize_t readv (int __fd, const struct iovec *, int __count);
+extern ssize_t writev (int __fd, const struct iovec *, int __count);
+extern ssize_t preadv (int __fd, const struct iovec *, int __count, __off_t);
+extern ssize_t pwritev (int __fd, const struct iovec *, int __count, __off_t);
 
 /* This file (usermode_lib.h) contains the main shim implementation for emulation of
  * kernel services, using GNU C (usermode) library calls, definitions in the header
@@ -52,13 +66,13 @@
 #include <sys_service.h>    /* system services: event threads, polling, memory, time, etc */
 #include <sys_debug.h>	    /* assert, verify, expect, panic, warn, etc */
 
-/* Avoid use of sys_service.h "expect" symbol conflicted by drbd */
+/* Fixup: avoid use of sys_service.h "expect" symbol conflicted by drbd */
 #undef expect
 #define expect_ne(x, y, fmtargs...)	_expect_ne((x), (y), ""fmtargs)
 #define _expect_ne(x, y, fmt, args...)	expect_eq((x) == (y), 0, "%s == %s"fmt, \
 						    __stringify(x), __stringify(y), ##args)
 
-/* Kernel code doesn't follow the __BYTE_ORDER convention */
+/* Fixup: kernel code doesn't follow the __BYTE_ORDER convention */
 #include <byteswap.h>
 #include <endian.h>
 
@@ -78,8 +92,15 @@
 #define __KERNEL__			/* what we are compiling thinks it is kernel code */
 #endif
 
-/* We emulate functions to support code from a Linux kernel version the range [2.6.24, 2.6.32] */
-/* Application "kernel backport" wrappers may be used to build more recent kernel code */
+#define MODULE
+
+/* We emulate functions to support code from a Linux kernel version the range [2.6.24, 2.6.32].
+ * More recent kernel code may be portable here if it has its own "backport" wrappers to let it
+ * run on kernel 2.6.32 or 2.6.24.
+ *
+ * UMC can be thought of as a backport wrapper that augments an existing 2.6.32 backport,
+ * extending it further back all the way to usermode library calls.
+ */
 #ifndef LINUX_VERSION_CODE
 #define LINUX_VERSION_CODE		KERNEL_VERSION(2, 6, 32)
 #endif
@@ -99,7 +120,15 @@
 
 #define CONFIG_X86_BSWAP
 #define CONFIG_X86_CMOV
-// #define CONFIG_GENERIC_FIND_NEXT_BIT		    //XXX untried
+
+//NEVER #define CONFIG_GENERIC_FIND_FIRST_BIT
+//NEVER #define CONFIG_GENERIC_FIND_NEXT_BIT
+//NEVER #define CONFIG_GENERIC_FIND_LAST_BIT
+
+#define CONFIG_HZ_1000
+#define CONFIG_HZ 1000
+
+#define CONFIG_NR_CPUS 64
 
 #define CONFIG_BUG
 #define CONFIG_PROC_FS
@@ -140,6 +169,11 @@
 
 #define offsetof(TYPE, MEMBER)		__builtin_offsetof(TYPE, MEMBER)
 
+#define	hweight8(v8)			__builtin_popcount(v8)
+#define	hweight16(v16)			__builtin_popcount(v16)
+#define	hweight32(v32)			__builtin_popcount(v32)
+#define	hweight64(v64)			__builtin_popcountl(v64)
+
 /* The kernel implementation requires HZ to be fixed at compile-time */
 #define HZ				1000U
 
@@ -149,24 +183,46 @@
 #define READ_ONCE(x)			(*_VOLATIZE(&(x)))
 #define	ACCESS_ONCE(x)			READ_ONCE(x)
 
-#define MODULE
+
 #define __WARN()			printk(KERN_WARNING "WARNING: at %s\n", FL_STR);
 struct notifier_block;
 
-/* UMC_kernel.h should be included ahead of any kernel headers except linux/types.h */
-#include <linux/types.h>    /* first real header file to #include */
-#include "UMC_kernel.h"	    /* definitions from kernel .h files we don't #include */
+#define barrier()			__sync_synchronize()
+
+static inline unsigned long
+_find_next_bit(const unsigned long *src, unsigned long nbits, unsigned long startbit, bool wanted)
+{
+    unsigned int bitno = startbit;
+    unsigned int idx;
+    unsigned long bitmask;
+
+    while (bitno < nbits) {
+	idx = bitno / BITS_PER_LONG;
+	bitmask = 1UL << (bitno % BITS_PER_LONG);
+
+	if (!!(src[idx] & bitmask) == wanted)
+	    return bitno;
+
+	bitno++;
+    }
+
+    return nbits;
+}
+
+#define find_next_bit(src, nbits, startbit)	    _find_next_bit(src, nbits, startbit, true)
+#define find_next_zero_bit(src, nbits, startbit)    _find_next_bit(src, nbits, startbit, false)
+#define	find_first_bit(src, nbits)		    find_next_bit(src, nbits, 0)
+#define	find_first_zero_bit(src, nbits)		    find_next_zero_bit(src, nbits, 0)
+
+#include <linux/kernel.h>   /* linux/kernel.h is the first kernel header file to #include */
+
+/* UMC_kernel.h should be included ahead of any kernel headers except linux/kernel.h */
+#include "UMC_kernel.h"	    /* definitions from some kernel .h files we don't #include */
 
 #include <sys/syscall.h>    /* ends up including a kernel header XXXX */
 
-#include <linux/swab.h>
-#include <linux/typecheck.h>
 #include <asm/unaligned.h>
-#include <asm/atomic.h>
 #include <linux/list.h>
-
-#define kmemcheck_bitfield_begin(x)	/* */
-#define kmemcheck_bitfield_end(x)	/* */
 
 /********** Basic **********/
 
@@ -199,19 +255,12 @@ extern _PER_THREAD size_t UMC_size_t_JUNK;   /* avoid unused-value gcc warnings 
 #define _USE(x)				({ if (0 && (uintptr_t)(x)==0) {}; 0; })
 
 #define kvec				iovec
+#define UIO_FASTIOV     8
+#define UIO_MAXIOV      1024
 
 #define hash_long(val, ORDER)		(     (long)(val) % ( 1ul << (ORDER) ) )
 #define hash_32(val, ORDER)		( (uint32_t)(val) % ( 1ul << (ORDER) ) )
 #define div_u64(num, den)		((num) / (den))
-#define ilog2(v) \
-	    (likely((uint64_t)(v) > 0) ? 63 - __builtin_clzl((uint64_t)(v)) : -1)
-#define fls64(v)			(1 + ilog2((unsigned int)(v)))
-#define fls(v)				(1 + ilog2((unsigned int)(v)))
-#define	__ffs64(addr)			__builtin_ffsl(addr)
-#define	__ffs(addr)			__builtin_ffs(addr)
-#define	hweight32(v32)			__builtin_popcount(v32)
-#define	hweight64(v64)			__builtin_popcount(v64)
-#define	hweight_long(v64)		__builtin_popcountl(v64)
 
 static inline uint64_t
 _ROUNDDOWN(uint64_t const v, uint64_t const q) { return v / q * q; }
@@ -255,14 +304,6 @@ _ROUNDUP(uint64_t const v, uint64_t const q) { return (v + q - 1) / q * q; }
 
 #define random32()			(random())  //XXX
 
-typedef unsigned int			fmode_t;
-typedef unsigned short			umode_t;
-
-#define FMODE_READ			0x01
-#define FMODE_WRITE			0x02
-#define FMODE_NDELAY			0x40
-#define FMODE_EXCL			0x80
-
 static inline void
 get_random_bytes(void * addr, int len)
 {
@@ -271,6 +312,14 @@ get_random_bytes(void * addr, int len)
     for (i = 0; i < len; i++)
 	p[i] = random();
 }
+
+typedef unsigned int			fmode_t;
+typedef unsigned short			umode_t;
+
+#define FMODE_READ			0x01
+#define FMODE_WRITE			0x02
+#define FMODE_NDELAY			0x40
+#define FMODE_EXCL			0x80
 
 #define capable(cap)			(geteuid() == 0)    //XXX
 #define CAP_SYS_ADMIN			21
@@ -373,7 +422,7 @@ extern struct module __this_module;
 
 #define MODULE_VERSION(str) static __unused \
 		string_t MODULE_VERSION = ("MODULE_VERSION='"str"_LIB'" \
-					       "(adapted to usermode)")
+						"(adapted to usermode)")
 
 #define MODULE_LICENSE(str) static __unused \
 		string_t MODULE_LICENSE = ("MODULE_LICENSE='"str"'")
@@ -422,8 +471,6 @@ extern void si_meminfo(struct sysinfo *si);
 #define SMP_CACHE_BYTES			__CACHE_LINE_BYTES
 #define ____cacheline_aligned		__attribute__((aligned(__CACHE_LINE_BYTES)))
 #define ____cacheline_aligned_in_smp	____cacheline_aligned
-
-#define prefetch(addr)			(void)0 //XXX DO_NOTHING()
 
 #define object_is_on_stack(addr)	false
 #define is_vmalloc_addr(addr)		false	/* no special-case memory */
@@ -507,7 +554,7 @@ extern void si_meminfo(struct sysinfo *si);
 #define free_page(addr)			free_pages((addr), 0)
 #define free_pages(addr, order)		kfree((void *)addr)
 
-//XXXX ADD mem_buf_allocator_set() to the sys_services API
+//XXX ADD mem_buf_allocator_set() to the sys_services API
 extern void _mem_buf_allocator_set(void * buf, sstring_t caller_id);
 #ifdef VALGRIND
 #define ARENA_DISABLE 1
@@ -529,7 +576,7 @@ extern void _mem_buf_allocator_set(void * buf, sstring_t caller_id);
 #define PAGE_CACHE_SIZE			(1UL<<PAGE_CACHE_SHIFT)
 #define PAGE_CACHE_MASK			(~(PAGE_CACHE_SIZE-1))
 
-/** kmem_cache **/
+/* kmem_cache */
 
 #define kmem_cache			sys_buf_cache
 
@@ -553,7 +600,7 @@ extern void _mem_buf_allocator_set(void * buf, sstring_t caller_id);
 #define kmem_cache_zalloc(cache, gfp)	(_USE(gfp), (void *)sys_buf_zalloc(cache))
 #define kmem_cache_free(cache, ptr)	(_USE(cache), sys_buf_drop((sys_buf_t)(ptr)))
 #define kmem_cache_size(cache)		((unsigned)(-1));   //XXXX bigger than you need
-					//XXXX ADD kmem_cache_size() to the sys_services API
+					//XXX ADD kmem_cache_size() to the sys_services API
 
 static inline void
 kmem_cache_destroy(struct kmem_cache * cache)
@@ -580,11 +627,11 @@ kmem_cache_create(string_t name, size_t size, size_t req_align,
     return sys_buf_cache_create(name, size, min_align);
 }
 
-/** mempool **/
+/* mempool */
 
 typedef	struct mempool {
     void		  * pool_data;	/* e.g. kmem_cache or mp */
-    void		  * pool_data2;
+    void		  * pool_data2;	//XXX
     void		  * pool_data3;	//XXX
     void		  * (*alloc_fn)(gfp_t, void * pool_data);
     void		    (*free_fn)(void * elem, void * pool_data);
@@ -620,7 +667,7 @@ mempool_destroy(mempool_t * mp)
 /* Create a mempool: pool_data passed to alloc/free functions */
 static inline mempool_t *
 mempool_create(unsigned int min_nr, void * (*alloc_fn)(gfp_t, void *),
-		       void (*free_fn)(void *, void *), void * pool_data)
+		void (*free_fn)(void *, void *), void * pool_data)
 {
     assert(alloc_fn != NULL);
     assert(free_fn != NULL);
@@ -666,7 +713,6 @@ _mempool_create_slab_pool(int min_nr, struct kmem_cache * kcache, sstring_t call
     ret->name = caller_id;
     ret->destroy_fn = _slab_pool_destroy;
     mem_buf_allocator_set(ret, caller_id);
-    //XXX should allocate and then free min_nr instances to get them in kcache
     return ret;
 }
 
@@ -692,13 +738,14 @@ _mempool_create_kmalloc_pool(int min_nr, size_t size, sstring_t caller_id)
 }
 
 #define mempool_create_kmalloc_pool(min_nr, size) \
-	    _mempool_create_kmalloc_pool((min_nr), (size), FL_STR)   
+	    _mempool_create_kmalloc_pool((min_nr), (size), FL_STR)
 
 #define kmemdup(addr, len, gfp)		memcpy(kalloc((len), (gfp)), (addr), (len))
 #define kstrdup(string, gfp)		kmemdup((string), 1+strlen(string), (gfp))
 #define vstrdup(string)			kstrdup((string), IGNORED)
-#define strlcpy(dst, src, size)		(dst[(size)-1] = '\0', strncpy((dst), (src), \
-						    (size)-1), (UMC_size_t_JUNK=strlen(dst)))
+#define strlcpy(dst, src, size)		(dst[(size)-1] = '\0',		    \
+					 strncpy((dst), (src), (size)-1),   \
+					 UMC_size_t_JUNK=strlen(src))
 
 #define access_ok(type, addr, size)	true
 #define copy_from_user(dst, src, len)	(memcpy((dst), (src), (len)), E_OK)
@@ -709,116 +756,12 @@ _mempool_create_kmalloc_pool(int min_nr, size_t size, sstring_t caller_id)
 
 #define get_user_pages(a,b,c,d,e,f,g,h)	E_OK	/* pages always mapped in usermode */
 
-/*** Bitmap (non-atomic) ***/
-
-#define BITS_TO_LONGS(nr)		DIV_ROUND_UP(nr, BITS_PER_BYTE * sizeof(long))
-
-#define DECLARE_BITMAP(name,bits)	unsigned long name[BITS_TO_LONGS(bits)]
-
-#define BITMAP_MASK(nbits) (((nbits) == BITS_PER_LONG) ? ~0UL : (1UL << (nbits)) - 1)
-
-#define find_next_bit(src, nbits, startbit)	    _find_next_bit(src, nbits, startbit, true)
-#define find_next_zero_bit(src, nbits, startbit)    _find_next_bit(src, nbits, startbit, false)
-
-#define	find_first_bit(src, nbits)	find_next_bit(src, nbits, 0)
-#define	find_first_zero_bit(src, nbits)	find_next_zero_bit(src, nbits, 0)
-
-#define	find_next_bit_le(src, nbits, startbit)	    find_next_bit(src, nbits, startbit) 
-#define	find_next_zero_bit_le(src, nbits, startbit) find_next_zero_bit(src, nbits, startbit) 
-
-#define	for_each_set_bit(bit, src, nbits)   \
-	    for ((bit) = find_first_bit((src), (nbits)); \
-		 (bit) < (nbits); \
-		 (bit) = find_next_bit((src), (nbits), (bit) + 1))
-
-#define __test_bit(bit, ptr)		_bitmap_test_bit((ptr), (bit))
-#define __set_bit(bit, ptr)		_bitmap_set_bit((ptr), (bit))
-#define __clear_bit(bit, ptr)		_bitmap_clear_bit((ptr), (bit))
-#define __change_bit(bit, ptr)		_bitmap_change_bit((ptr), (bit))
-
-#define __test_and_set_bit(bitno, ptr)	({  bool __ret = __test_bit((bitno), (ptr)); \
-					    __set_bit((bitno), (ptr)); \
-					    __ret; \
-					})
-
-#define __test_and_clear_bit(bitno, ptr) ({  bool __ret = __test_bit((bitno), (ptr)); \
-					    __clear_bit((bitno), (ptr)); \
-					    __ret; \
-					})
-
-#define __test_and_change_bit(bitno, ptr) ({  bool __ret = __test_bit((bitno), (ptr)); \
-					    __change_bit((bitno), (ptr)); \
-					    __ret; \
-					})
-
-//XXX endian
-#define __test_and_set_bit_le(bitno, ptr)	__test_and_set_bit((bitno), (ptr))
-#define __test_and_clear_bit_le(bitno, ptr)	__test_and_clear_bit((bitno), (ptr))
-#define __test_and_change_bit_le(bitno, ptr)	_test_and_change_bit((bitno), (ptr))
-
-static inline unsigned long
-_find_next_bit(const unsigned long *src, unsigned long nbits, unsigned long startbit, bool wanted)
-{
-    unsigned int bitno = startbit;
-    unsigned int idx;
-    unsigned long bitmask;
-
-    while (bitno < nbits) {
-	idx = bitno / BITS_PER_LONG;
-	bitmask = 1UL << (bitno % BITS_PER_LONG);
-
-	if (!!(src[idx] & bitmask) == wanted)
-	    return bitno;
-
-	bitno++;
-    }
-
-    return nbits;
-}
-
-static inline bool
-_bitmap_test_bit(const unsigned long * src, unsigned int bitno)
-{
-    unsigned int idx = bitno / BITS_PER_LONG;
-    unsigned long bitmask = 1UL << (bitno % BITS_PER_LONG);
-    return (src[idx] & bitmask) != 0;
-}
-
-static inline void
-_bitmap_set_bit(unsigned long * dst, unsigned int bitno)
-{
-    unsigned int idx = bitno / BITS_PER_LONG;
-    unsigned long bitmask = 1UL << (bitno % BITS_PER_LONG);
-    dst[idx] |= bitmask;
-}
-
-static inline void
-_bitmap_clear_bit(unsigned long * dst, unsigned int bitno)
-{
-    unsigned int idx = bitno / BITS_PER_LONG;
-    unsigned long bitmask = 1UL << (bitno % BITS_PER_LONG);
-    dst[idx] &=~ bitmask;
-}
-
-static inline void
-_bitmap_change_bit(unsigned long * dst, unsigned int bitno)
-{
-    unsigned int idx = bitno / BITS_PER_LONG;
-    unsigned long bitmask = 1UL << (bitno % BITS_PER_LONG);
-    dst[idx] ^= bitmask;
-}
-
-#include <linux/bitmap.h>
-
-#define bitmap_parse(buf, buflen, maskp, nmaskbits) \
-	    __bitmap_parse(buf, buflen, 0, maskp, nmaskbits)
-
 /*** Formatting and logging ***/
 
 /* string_concat_free() appends suffix string to prefix string, CONSUMING BOTH and returning
  * the concatination -- either or both strings may be NULL -- if both, NULL is returned.
  */
-//XXXX ADD mem_string_concat_free() to the sys_services API
+//XXX ADD mem_string_concat_free() to the sys_services API
 #define string_concat_free(prefix, suffix) mem_string_concat_free((prefix), (suffix), FL_STR)
 extern string_t mem_string_concat_free(string_t const prefix, string_t const suffix,
 							sstring_t const caller_id);
@@ -830,10 +773,7 @@ extern string_t mem_string_concat_free(string_t const prefix, string_t const suf
 
 #define kasprintf(gfp, fmt, args...)	sys_sprintf(fmt, ##args)
 #define kvasprintf(gfp, fmt, va)	sys_vsprintf(fmt, va)
-#define dump_stack()			sys_backtrace("kernel-code call to dump_stack()")
 #define panic(fmtargs...)		sys_panic(fmtargs)
-#define printk(fmtargs...)		sys_eprintf(fmtargs)
-#define vprintk(fmt, va)		sys_veprintf(fmt, va)
 
 #ifndef KBUILD_MODNAME
 #define _MODNAME			""
@@ -841,40 +781,10 @@ extern string_t mem_string_concat_free(string_t const prefix, string_t const suf
 #define _MODNAME			KBUILD_MODNAME ": "
 #endif
 
-#define pr_warn_ratelimited(fmtargs...)	pr_warning(fmtargs)
+#define pr_warn_ratelimited(fmtargs...)	pr_warning(fmtargs) /* no ratelimit */
 
 #define KERN_LOC_FIELDS			current->pid, __func__, __LINE__, __FILE__
 #define KERN_LOC_FMT			"[%u] %s:%u (%s):"
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27)
-
-struct ratelimit_state {
-    int					interval;
-    int					burst;
-    int					missed;
-    int					printed;
-    unsigned long			begin;
-};
-
-#define DEFINE_RATELIMIT_STATE(name, interv, brst)	\
-	    struct ratelimit_state name = { .interval = interv, .burst = brst }
-
-#define DEFAULT_RATELIMIT_INTERVAL	(5 * HZ)
-#define DEFAULT_RATELIMIT_BURST		10
-
-#define RATELIMIT_STATE_INIT(name, interval_init, burst_init) {         \
-    .lock           = __RAW_SPIN_LOCK_UNLOCKED(name.lock),		\
-    .interval       = interval_init,					\
-    .burst          = burst_init,					\
-}
-
-static inline int
-__ratelimit(struct ratelimit_state *rs)
-{
-    return 1;	    //XXXX __ratelimit
-}
-
-#endif
 
 /*** Usermode helper ***/
 
@@ -909,28 +819,16 @@ call_usermodehelper(const char * progpath, char * argv[], char * envp[], int wai
 /********** Barriers, Atomics, Locking **********/
 
 #define __barrier()			__sync_synchronize()
-#define barrier()			__barrier()
 #define smp_mb()			__barrier()
 #define smp_rmb()			__barrier()
 #define smp_wmb()			__barrier()
 
-/* For some reason the kernel omits declaring its atomic types as volatile, resulting
- * in the need to additionally call auxiliary compiler-barrier functions there.
- *
- * Here in the usermode library, the CPU barrier is provided by the __sync_fetch_and_*()
- * builtin function, and the compiler barrier by virtue of the content of the atomic_t
- * being declared volatile.
- */
-#define smp_mb__after_set_bit()		DO_NOTHING()
-#define smp_mb__before_clear_bit()	DO_NOTHING()
-#define	smp_mb__after_clear_bit()	DO_NOTHING()
-#define	smp_mb__after_atomic()		DO_NOTHING()
-#define	smp_mb__before_atomic()		DO_NOTHING()
-#define	smp_mb__before_atomic_dec()	DO_NOTHING()
-#define	smp_mb__after_atomic_dec()	DO_NOTHING()
-#define	smp_mb__after_atomic_inc()	DO_NOTHING()
+#define	smp_mb__before_atomic_dec()	__barrier()	//XXX needed?
+#define	smp_mb__after_atomic_dec()	__barrier()	//XXX needed?
+#define	smp_mb__after_atomic_inc()	__barrier()	//XXX needed?
 
 #define ATOMIC_INIT(n)			((atomic_t){ .counter = (n) })
+
 					//XXX Figure out which of these barriers isn't needed
 #define atomic_get(ptr)			({ __barrier(); int32_t __ret = (ptr)->counter; __barrier(); __ret; })
 #define atomic_set(ptr, val)		do { __barrier(); (ptr)->counter = (val); __barrier(); } while (0)
@@ -942,8 +840,8 @@ call_usermodehelper(const char * progpath, char * argv[], char * envp[], int wai
 /* Arithmetic atomics return the NEW value */
 #define atomic_add_return(n, ptr)	__sync_add_and_fetch(&(ptr)->counter, (n))
 #define atomic_sub_return(n, ptr)	__sync_sub_and_fetch(&(ptr)->counter, (n))
-#define atomic_inc_return(ptr)		atomic_add(1, (ptr))
-#define atomic_dec_return(ptr)		atomic_sub(1, (ptr))
+#define atomic_inc_return(ptr)		atomic_add_return(1, (ptr))
+#define atomic_dec_return(ptr)		atomic_sub_return(1, (ptr))
 
 #define atomic_read(ptr)		atomic_get(ptr)
 #define atomic_add(n, ptr)		atomic_add_return((n), (ptr))
@@ -989,46 +887,30 @@ atomic_add_unless(atomic_t * ptr, int increment, int unless_match)
     return oldval;
 }
 
-/* These return true if bit was previously set, false if not */
+/*** Bitmap (non-atomic) ***/
 
 static inline bool
-test_bit(unsigned int bitno, const volatile unsigned long * bmap)
+_bitmap_test_bit(const unsigned long * src, unsigned int bitno)
 {
     unsigned int idx = bitno / BITS_PER_LONG;
     unsigned long bitmask = 1UL << (bitno % BITS_PER_LONG);
-    return (__atomic_load_8(&bmap[idx], __ATOMIC_SEQ_CST) & bitmask) != 0;
+    return (src[idx] & bitmask) != 0;
 }
 
-static inline bool
-test_and_set_bit(unsigned int bitno, volatile unsigned long * bmap)
+static inline void
+_bitmap_set_bit(unsigned long * dst, unsigned int bitno)
 {
     unsigned int idx = bitno / BITS_PER_LONG;
     unsigned long bitmask = 1UL << (bitno % BITS_PER_LONG);
-    return (__sync_fetch_and_or(&bmap[idx], bitmask) & bitmask) != 0;
+    dst[idx] |= bitmask;
 }
 
-static inline bool
-test_and_clear_bit(unsigned int bitno, volatile unsigned long * bmap)
-{
-    unsigned int idx = bitno / BITS_PER_LONG;
-    unsigned long bitmask = 1UL << (bitno % BITS_PER_LONG);
-    return (__sync_fetch_and_and(&bmap[idx], ~bitmask) & bitmask) != 0;
-}
-
-static inline bool
-test_and_change_bit(unsigned int bitno, volatile unsigned long * bmap)
-{
-    unsigned int idx = bitno / BITS_PER_LONG;
-    unsigned long bitmask = 1UL << (bitno % BITS_PER_LONG);
-    return (__sync_fetch_and_xor(&bmap[idx], bitmask) & bitmask) != 0;
-}
+#include <linux/bitmap.h>
 
 #define set_bit(bitno, ptr)		test_and_set_bit((bitno), (ptr))
 #define clear_bit(bitno, ptr)		test_and_clear_bit((bitno), (ptr))
 #define change_bit(bitno, ptr)		test_and_change_bit((bitno), (ptr))
-
 #define clear_bit_unlock(nr, addr)	clear_bit((nr), (addr))
-#define test_bit_le(bitno, ptr)		test_bit((bitno), (ptr))
 
 /*** spin lock ***/
 
@@ -1036,7 +918,7 @@ test_and_change_bit(unsigned int bitno, volatile unsigned long * bmap)
 
 #define UMC_LOCK_CHECKS	    /* do lock checks in all builds */
 
-#if 1
+#if 1	    //XXX _SPINWAITING()
 //XXXX change this to only yield after some number (like 100) of spins
 #define _SPINWAITING()			usleep(1)
 #else
@@ -1104,7 +986,7 @@ rwlock_take_try(rwlock_t * rw, uint32_t ntake)
 	atomic_add(ntake, &rw->count);	/* give back our overdraft of rw->count */
 #ifdef UMC_LOCK_CHECKS
 	verify(rw->owner != sys_thread_current(),
-	       "Thread attempts to acquire a rw_spinlock it already holds");
+		"Thread attempts to acquire a rw_spinlock it already holds");
 #endif
 	return false;
     }
@@ -1211,9 +1093,9 @@ _spin_lock_try(spinlock_t * lock, sstring_t whence)
 #ifdef UMC_LOCK_CHECKS
 	if (err == EBUSY) {
 	    verify(lock->owner != sys_thread_current(),
-	       "Thread %d ('%s') attempts to acquire a spinlock '%s' (%p) it already holds (%p) taken at %s",
-	       sys_thread_current()->tid, sys_thread_name(sys_thread_current()),
-	       lock->name, lock, lock->owner, lock->whence);
+		"Thread %d ('%s') attempts to acquire a spinlock '%s' (%p) it already holds (%p) taken at %s",
+		sys_thread_current()->tid, sys_thread_name(sys_thread_current()),
+		lock->name, lock, lock->owner, lock->whence);
 	} else
 	    sys_warning("Error %s (%d) on pthread_mutex_trylock(%s) from %s",
 		    strerror(err), err, lock->name, whence);
@@ -1236,8 +1118,8 @@ _spin_lock(spinlock_t * lock, sstring_t whence)
     while (!_spin_lock_try(lock, whence)) _SPINWAITING();
 }
 
-//XXXX spin_lock_nested() support: change the pthread lock type to RECURSIVE ?
-#define spin_lock_nested(lock, subclass)    UMC_STUB(spin_lock_nested) //XXXXX
+//XXX spin_lock_nested() support: change the pthread lock type to RECURSIVE ?
+#define spin_lock_nested(lock, subclass)    UMC_STUB(spin_lock_nested) //XXXXXX
 
 static inline void
 spin_unlock(spinlock_t * const lock)
@@ -1316,13 +1198,13 @@ _mutex_lock(mutex_t * m, sstring_t whence)
 	}
 #ifdef UMC_LOCK_CHECKS
 	verify(m->owner != sys_thread_current(),
-	       "Thread attempts to acquire a mutex it already holds, taken at %s", m->whence);
+		"Thread attempts to acquire a mutex it already holds, taken at %s", m->whence);
 #endif
 	_SPINWAITING();
     }
 
     /* We exhausted the time we're willing to spinwait -- give up the CPU */
-#if 0
+#if 0	    // mutex wait time measurements
 #if !OPTIMIZED
     sys_time_t const t_start = sys_time_now();
 #endif
@@ -1336,7 +1218,7 @@ _mutex_lock(mutex_t * m, sstring_t whence)
     m->owner = sys_thread_current();
 #endif
 
-#if 0
+#if 0	    // mutex wait time measurements
 #if !OPTIMIZED
     sys_time_t const t_delta = sys_time_now() - t_start;
     trace("'%s' (%u) at %s acquires mutex '%s' (%p) after sleeping %"PRIu64" ns",
@@ -1349,7 +1231,7 @@ _mutex_lock(mutex_t * m, sstring_t whence)
 #endif
 }
 
-#define mutex_lock_interruptible(m)	(mutex_lock(m), E_OK)	//XXX
+#define mutex_lock_interruptible(m)	(mutex_lock(m), E_OK)	//XXXXX
 
 static inline void
 mutex_unlock(mutex_t * m)
@@ -1451,13 +1333,13 @@ struct rcu_head {
 #define rcu_assign_pointer(ptr, val)	do { _rcu_write_lock(); \
 					     (ptr) = (val); \
 					     _rcu_write_unlock(); \
-                                        } while (0)
+					} while (0)
 
 /* Does func(head) under RCU write lock */
 #define call_rcu(head, func)		do { _rcu_write_lock(); \
 					     (func)(head); \
 					     _rcu_write_unlock(); \
-                                        } while (0)
+					} while (0)
 
 //XXXXX I think this isn't really right, but I could be wrong about that
 #define synchronize_rcu()		do { _rcu_write_lock(); \
@@ -1556,8 +1438,8 @@ struct kobj_attribute {
 
 #define __ATTR(_name, _mode, _show, _store) {			    \
     .attr = { .name = __stringify(_name), .mode = _mode },	    \
-    .show   = _show,                                                \
-    .store  = _store,                                               \
+    .show   = _show,						    \
+    .store  = _store,						    \
 }
 
 #define _kobject_init(kobj, type)	do { record_zero(kobj);		    \
@@ -1569,7 +1451,7 @@ struct kobj_attribute {
 /* type argument was added to kobject_init() in 2.6.25 */
 #define kobject_init(kobj, type...)	_kobject_init((kobj), type+0)
 
-static void
+static inline void
 kobject_release(struct kref * kref)
 {
     struct kobject * kobj = container_of(kref, struct kobject, kref);
@@ -1595,7 +1477,6 @@ kobject_get(struct kobject * kobj)
 /********** Tasks and Scheduling **********/
 
 #define	NR_CPUS				BITS_PER_LONG	//XXX
-#define nr_cpumask_bits			NR_CPUS
 extern unsigned int			nr_cpu_ids;
 
 #define raw_smp_processor_id()		sched_getcpu()
@@ -1613,7 +1494,7 @@ typedef struct { unsigned long bits[(NR_CPUS+BITS_PER_LONG-1) / BITS_PER_LONG]; 
 #define cpumask_bits(maskp)		((maskp)->bits)
 #define cpumask_clear(maskp)		bitmap_zero((maskp), NR_CPUS)
 #define cpumask_and(d, s1, s2)		bitmap_and((d)->bits, (s1)->bits, (s2)->bits, NR_CPUS)
-#define cpumask_empty(d)		__bitmap_empty((d)->bits, NR_CPUS)
+#define cpumask_empty(d)		bitmap_empty((d)->bits, NR_CPUS)
 
 #define cpumask_scnprintf(buf, bufsize, mask)	\
 	    (snprintf((buf), (bufsize), "<0x%016x>", mask.bits[0]), strlen(buf))
@@ -1626,9 +1507,10 @@ _cpumask_test_cpu(int cpu, cpumask_t *cpumask)
 
 /* The cpumask_var_t is stored directly in the pointer, not allocated; so max 64 CPUs */
 typedef cpumask_t			cpumask_var_t[1];   //XXX
-assert_static(NR_CPUS <= BITS_PER_LONG);
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 28)
+
+#define nr_cpumask_bits			nr_cpu_ids
 
 static inline void
 free_cpumask_var(cpumask_var_t mask)
@@ -1651,12 +1533,13 @@ cpumask_setall(cpumask_t *dstp)
 static inline bool
 cpumask_equal(const cpumask_t *src1p, const cpumask_t *src2p)
 {
-    return __bitmap_equal(cpumask_bits(src1p), cpumask_bits(src2p), nr_cpumask_bits);
+    return bitmap_equal(cpumask_bits(src1p), cpumask_bits(src2p), nr_cpumask_bits);
 }
 
 static inline bool
 alloc_cpumask_var(cpumask_var_t *mask, gfp_t flags)
 {
+    assert_static(NR_CPUS <= BITS_PER_LONG);
     return true;
 }
 
@@ -1702,7 +1585,7 @@ static inline int
 num_online_cpus(void)
 {
     cpu_set_t cpuset;
-    //XXX FIX:  this is supposed to be system CPUs, not this thread's
+    //XXX maybe this is supposed to be system CPUs, not this thread's
     int rc = sched_getaffinity(getpid(), sizeof(cpuset), &cpuset);
     if (rc) return 0;
     return CPU_COUNT(&cpuset);
@@ -1717,7 +1600,7 @@ num_online_cpus(void)
 #define in_interrupt()			(in_irq() || in_softirq())
 
 #define need_resched()			false
-#define cond_resched()			DO_NOTHING()	//XXX ?
+#define cond_resched()			DO_NOTHING()	//XXXX ?
 
 /*** Wait Queue -- wait (if necessary) for a condition to be true ***/
 
@@ -1806,7 +1689,7 @@ struct completion {
 	    } while (0)
 
 #define complete(c) \
-	    do { atomic_inc(&(c)->done);          wake_up(    &(c)->wait); } while (0)
+	    do { atomic_inc(&(c)->done); wake_up(&(c)->wait); } while (0)
 #define complete_all(c) \
 	    do { atomic_set(&(c)->done, 1ul<<30); wake_up_all(&(c)->wait); } while (0)
 
@@ -1839,7 +1722,7 @@ struct task_struct {
     cpumask_t		    cpus_allowed;
     bool	   volatile should_stop;    /* kthread shutdown signalling */
     char		    comm[TASK_COMM_LEN];    /* thread name */
-    pid_t	            pid;	    /* tid, actually */
+    pid_t		    pid;	    /* tid, actually */
     int			    flags;	    /* ignored */
     void		  * io_context;	    /* unused */
     struct mm_struct      * mm;		    /* unused */
@@ -1850,8 +1733,8 @@ struct task_struct {
 #define TASK_INTERRUPTIBLE		1
 #define TASK_UNINTERRUPTIBLE		2
 
-#define TC_PRIO_INTERACTIVE_BULK        4
-#define TC_PRIO_INTERACTIVE             6
+#define TC_PRIO_INTERACTIVE_BULK	4
+#define TC_PRIO_INTERACTIVE		6
 
 #define kthread_should_stop()		(current->should_stop)
 #define get_task_comm(buf, task)	strncpy((buf), ((task)->comm), TASK_COMM_LEN)
@@ -1859,16 +1742,7 @@ struct task_struct {
 /* Rename kernel symbol that conflicts with library symbol */
 #define sched_setscheduler UMC_sched_setscheduler
 
-static inline error_t
-UMC_sched_setscheduler(struct task_struct * task, int policy, struct sched_param * param)
-{
-//XXX He probably wants the realtime scheduler, but not happening today
-//  return UMC_kernelize(sched_setscheduler(task->pid, policy, param));
-
-    // nice him up instead
-    setpriority(PRIO_PROCESS, task->pid, param->sched_priority > 0 ? -20 : 0);
-    return E_OK;
-}
+extern error_t UMC_sched_setscheduler(struct task_struct *, int policy, struct sched_param *);
 
 #define trace_signal(fmtargs...)    //	sys_notice(fmtargs)
 
@@ -2091,7 +1965,7 @@ _flush_signals(struct task_struct * task, sstring_t caller_id)
 		spin_lock(&(WAITQ).lock); \
 		error_t const _ret = \
 		    _wait_event_locked_timeout((WAITQ), (COND), \
-					       &(WAITQ).lock, NULL, (t_end)); \
+						&(WAITQ).lock, NULL, (t_end)); \
 		spin_unlock(&(WAITQ).lock); \
 		_ret; \
 	    })
@@ -2241,8 +2115,8 @@ _wake_up_process(struct task_struct * task, string_t whence)
     /* Let a newly-created thread get get going */
     complete(&task->start_release);
     pr_debug("%s: thread %s (%p, %u) WAKES UP thread %s (%p) task %s (%p)\n",
-	     whence, sys_thread_name(sys_thread), sys_thread, current->pid,
-		      sys_thread_name(task->SYS), task->SYS, task->comm, task);
+		whence, sys_thread_name(sys_thread), sys_thread, current->pid,
+		sys_thread_name(task->SYS), task->SYS, task->comm, task);
 }
 
 extern error_t UMC_kthread_fn(void * v_task);    /* start function for a new kthread */
@@ -2349,14 +2223,14 @@ kthread_stop(struct task_struct * task)
 
 #define tsk_cpus_allowed(task)		(&(task)->cpus_allowed)
 
-#define set_user_nice(task, niceness)	/* setpriority(PRIO_PROCESS, (task)->pid, (niceness)) */
+#define set_user_nice(task, niceness)	//XXX setpriority(PRIO_PROCESS, (task)->pid, (niceness))
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 26)
 
 #define for_each_cpu(cpu, mask)				    \
-	    for ((cpu) = cpumask_next(-1, (mask));          \
+	    for ((cpu) = cpumask_next(-1, (mask));	    \
 		    (cpu) = cpumask_next((cpu), (mask)),    \
-		    (cpu) < nr_cpumask_bits;)
+		    (cpu) < nr_cpu_ids;)
 
 #define for_each_online_cpu(cpu)	for_each_cpu(cpu, tsk_cpus_allowed(current))	//XXX
 
@@ -2529,7 +2403,7 @@ _irqthread_run(string_t name)
 extern void UMC_alarm_handler(void * const v_timer, uint64_t const now, error_t);
 
 struct timer_list {
-    void	          (*function)(uintptr_t);   /* kernel-code handler */
+    void		  (*function)(uintptr_t);   /* kernel-code handler */
     uintptr_t		    data;		    /* kernel-code handler arg */
     uint64_t		    expires;		    /* expiration "jiffy" time */
     sys_alarm_entry_t	    alarm;		    /* non-NULL when alarm pending (ticking) */
@@ -2601,7 +2475,7 @@ mod_timer(struct timer_list * timer, uint64_t expire_j)
 struct work_struct {
     struct list_head	    entry;
     void		  (*fn)(struct work_struct *);
-    void	          * lockdep_map;    /* unused */
+    void		  * lockdep_map;    /* unused */
 };
 
 #define INIT_WORK(WORK, _fn)		do { INIT_LIST_HEAD(&(WORK)->entry); \
@@ -2614,7 +2488,7 @@ struct delayed_work {
 };
 
 #define INIT_DELAYED_WORK(DWORK, _fn)	do { init_timer(&(DWORK)->timer); \
-				             INIT_WORK(&(DWORK)->work, (_fn)); \
+					     INIT_WORK(&(DWORK)->work, (_fn)); \
 					} while (0)
 
 extern void UMC_delayed_work_process(uintptr_t u_dwork);
@@ -2630,7 +2504,7 @@ extern void UMC_delayed_work_process(uintptr_t u_dwork);
 struct workqueue_struct {
     struct list_head		    list;
     spinlock_t			    lock;
-    struct task_struct            * owner;
+    struct task_struct		  * owner;
     struct wait_queue_head	    wake;
     struct wait_queue_head	    flushed;
     bool		   volatile is_idle;
@@ -2671,12 +2545,14 @@ destroy_workqueue(struct workqueue_struct * workq)
 
 #define queue_work(WORKQ, WORK)	\
 	    ( !list_empty_careful(&(WORK)->entry) \
-	        ? false	/* already on list */ \
-	        : ({ bool _do_wake = false; \
+		? false	/* already on list */ \
+		: ({ bool _do_wake = false; \
 		     spin_lock(&(WORKQ)->lock); \
-	             {   list_add_tail(&(WORK)->entry, &(WORKQ)->list); \
-		         if (unlikely((WORKQ)->is_idle)) _do_wake = true; \
-	             } spin_unlock(&(WORKQ)->lock); \
+		     {   list_add_tail(&(WORK)->entry, &(WORKQ)->list); \
+			 if (unlikely((WORKQ)->is_idle)) \
+			    _do_wake = true; \
+		     } \
+		     spin_unlock(&(WORKQ)->lock); \
 		     if (unlikely(_do_wake)) wake_up(&(WORKQ)->wake); \
 		     true;	/* now on list */ }) \
 	    )
@@ -2696,7 +2572,7 @@ extern struct workqueue_struct * UMC_workq;
 #define schedule_work(WORK)		queue_work(UMC_workq, (WORK))
 #define flush_scheduled_work()		flush_workqueue(UMC_workq)
 
-//XXXX Limitation: nasty hack only works if WORK is on the general-use work queue
+//XXXXX Limitation: nasty hack only works if WORK is on the general-use work queue
 #define flush_work(WORK)		do { _USE(WORK); flush_scheduled_work(); } while (0)
 #define cancel_work_sync(WORK)		do { _USE(WORK); flush_scheduled_work(); } while (0)
 
@@ -2721,6 +2597,7 @@ extern struct list_head UMC_pagelist;
 extern spinlock_t UMC_pagelist_lock;
 
 #define page_address(page)		((page)->vaddr)
+//XXXXXXXXXXX#define page_to_phys(page)		page_address(page)  /* userspace */
 #define page_count(page)		kref_read(&(page)->kref)
 #define page_private(page)		((page)->private)
 #define set_page_private(page, v)	((page)->private = (v))
@@ -2736,7 +2613,7 @@ extern spinlock_t UMC_pagelist_lock;
 /* Ugh.  Search down the page list to find the one containing the specified addr */
 //XXXX PERF virt_to_page needs a faster lookup
 static inline struct page *
-virt_to_page(void * addr)
+virt_to_page(const void * addr)
 {
     struct page * ret = NULL;
     struct page * page;
@@ -2756,8 +2633,7 @@ virt_to_page(void * addr)
     return ret;
 }
 
-//XXXX Use a kmem_cache for the page structure
-static void
+static inline void
 _free_page_struct(struct kref * kref)
 {
     struct page * page = container_of(kref, struct page, kref);
@@ -2786,6 +2662,7 @@ put_page(struct page * page)
 static inline struct page *
 _alloc_pages(gfp_t gfp, unsigned int order, sstring_t caller_id)
 {
+    //XXXX Use a kmem_cache for the page structure
     struct page * page = record_alloc(page);
     mem_buf_allocator_set(page, caller_id);
 
@@ -2906,7 +2783,6 @@ _mempool_create_page_pool(int min_nr, int order, sstring_t caller_id)
     ret->private = order;
     ret->destroy_fn = _page_pool_destroy;
     mem_buf_allocator_set(ret, caller_id);
-    //XXX should allocate and then free min_nr instances to get them in kcache
     return ret;
 }
 
@@ -2929,7 +2805,7 @@ struct backing_dev_info {
 static inline int
 bdi_congested(struct backing_dev_info * bdi_ptr, long bits)
 {
-    return 0;		//XXXX
+    return 0;		//XXXX bdi_congested() always says "no"
 }
 
 /* Ignored */
@@ -2948,10 +2824,10 @@ struct request_queue {
     void			      *	queuedata;
     unsigned int			in_flight[2];
     unsigned long			queue_flags;
-    struct backing_dev_info	        backing_dev_info;
+    struct backing_dev_info		backing_dev_info;
     struct queue_limits			limits;
     void			      (*unplug_fn)(void *);
-    struct kobject		        kobj;
+    struct kobject			kobj;
     unsigned int			dma_pad_mask;
     gfp_t				bounce_gfp;
 //  struct mutex			sysfs_lock;
@@ -3032,7 +2908,7 @@ struct dentry {
     struct inode	      * d_inode;
 };
 
-#define d_unhashed(dentry)              true	//XXXX
+#define d_unhashed(dentry)		true	//XXXX
 
 struct nameidata;
 
@@ -3054,7 +2930,7 @@ struct file {
     struct dentry	      * f_dentry;
     struct inode	      * inode;
     struct file_ra_state	f_ra;
-}; 
+};
 
 struct address_space_ops {
     bool		(*is_partially_uptodate)(struct page *, read_descriptor_t *, loff_t);
@@ -3102,7 +2978,7 @@ filp_open_real(string_t name, int flags, umode_t mode)
 
     assert_imply(S_ISREG(statbuf.st_mode), statbuf.st_size == lseek_end_ofs);
 
-#if 0
+#if 0	    // S_BLOCKIO_TYPE
 #define S_BLOCKIO_TYPE	S_IFBLK	    /* make block devices look like block devices */
 #else
 #define S_BLOCKIO_TYPE	S_IFREG	    /* make block devices look like files */
@@ -3110,19 +2986,19 @@ filp_open_real(string_t name, int flags, umode_t mode)
 
     /* Hack /dev/zero to look like a big block device (or file) */
     if (S_ISCHR(statbuf.st_mode)) {
-        struct stat zero_statbuf;
-        int rc = stat("/dev/zero", &zero_statbuf);
-        if (rc == 0 && statbuf.st_rdev == zero_statbuf.st_rdev) {
+	struct stat zero_statbuf;
+	int rc = stat("/dev/zero", &zero_statbuf);
+	if (rc == 0 && statbuf.st_rdev == zero_statbuf.st_rdev) {
 	    statbuf.st_size = 1ul << 40;
 	    statbuf.st_mode = S_BLOCKIO_TYPE | (statbuf.st_mode & 0777);
-        }
+	}
     } else if (S_ISBLK(statbuf.st_mode)) {
 	statbuf.st_size = lseek_end_ofs;
 	statbuf.st_mode = S_BLOCKIO_TYPE | (statbuf.st_mode & 0777);
     }
 
     sys_notice("name='%s' fd=%d statbuf.st_size=%"PRIu64" lseek_end_ofs=%"PRId64"/0x%"PRIx64,
-	       name, fd, statbuf.st_size, lseek_end_ofs, lseek_end_ofs);
+		name, fd, statbuf.st_size, lseek_end_ofs, lseek_end_ofs);
 
     struct file * file = _file_alloc();
     file->inode = alloc_inode(0);
@@ -3236,17 +3112,15 @@ struct class_interface {
 #define register_chrdev(major, name, fops)	(_USE(name), E_OK)
 #define unregister_chrdev(major, name)		DO_NOTHING()
 
-#include <linux/ioctl.h>
-
 /*** Block Device ***/
 
 typedef u8				blk_status_t;
 
 #define BLK_STS_OK		0
-#define BLK_STS_NOTSUPP         1
-#define BLK_STS_MEDIUM          7
-#define BLK_STS_RESOURCE        9
-#define BLK_STS_IOERR           10
+#define BLK_STS_NOTSUPP		1
+#define BLK_STS_MEDIUM		7
+#define BLK_STS_RESOURCE	9
+#define BLK_STS_IOERR		10
 
 struct blk_plug_cb { void *data; };
 struct blk_plug { };
@@ -3285,15 +3159,17 @@ blk_alloc_queue(gfp_t gfp)
 static inline void *
 blk_mq_rq_to_pdu(struct request *rq)
 {
-        return rq + 1;
+	return rq + 1;
 }
+
+#define blk_bidi_rq(rq)                ((rq)->next_rq != NULL)
 
 #define BDEVNAME_SIZE		32	/* Largest string for a blockdev identifier */
 
 #define register_blkdev(major, name)		E_OK
 #define unregister_blkdev(major, name)		DO_NOTHING()
 
-#define blkdev_issue_flush(bdev, xxx)				    (-EPERM)
+#define blkdev_issue_flush(bdev, xxx)				    (-EPERM)	    //XXXXX
 #define blkdev_issue_discard(bdev, sector, nr_sects, gfp, flags)    (-EOPNOTSUPP)   //XXXX
 
 #define bd_link_disk_holder(a, b)	E_OK		//XXX sysfs
@@ -3344,7 +3220,7 @@ bdget(dev_t devt)
 //XXXXX #define bdput(bd)		iput((bdev)->bd_inode)
 					//mutex_destroy(&file->inode->i_mutex);
 //#define bdput(bd)			record_free(container_of((bd), struct bdev_inode, bdev))   //XXX use inode refcount?
-#define bdput(bd)			do { /* leak XXXXX */ } while (0)
+#define bdput(bd)			do { /* leak XXXXXX */ } while (0)
 
 #define bdev_get_queue(bdev)		((bdev)->bd_disk->queue)
 #define bdev_discard_alignment(bdev)	bdev_get_queue(bdev)->limits.discard_alignment
@@ -3381,7 +3257,7 @@ struct gendisk {
     struct request_queue	      * queue;
     int					major;
     int					first_minor;
-    char			        disk_name[32];
+    char				disk_name[32];
     void			      * private_data;
     const struct block_device_operations * fops;
     struct hd_struct			part0;
@@ -3427,11 +3303,14 @@ open_bdev_exclusive(const char *path, fmode_t mode, void *holder)
     struct block_device *bdev;
 
     bdev = lookup_bdev(path);
-    if (!bdev)
+    if (!bdev) {
+	    sys_warning("****************** bdev %s not found", path);
 	    return ERR_PTR(-ENODEV);
+    }
 
     if ((mode & FMODE_WRITE) && bdev_read_only(bdev)) {
-	    sys_warning("****************** bdev says it is readonly");
+	    sys_warning("****************** bdev %s says it is readonly", path);
+	    //XXXXX bdput(bdev);
 	    return ERR_PTR(-EACCES);
     }
 
@@ -3444,6 +3323,7 @@ open_bdev_exclusive(const char *path, fmode_t mode, void *holder)
 
     int error = bdev->bd_disk->fops->open(bdev, mode);
     if (error) {
+	sys_warning("****************** bdev %s failed fops->open() %d", path, error);
 	//XXXXX bdput(bdev);
 	return ERR_PTR(error);
     }
@@ -3477,7 +3357,7 @@ filp_open_bdev(string_t name, int inflags)
     }
 
     sys_notice("name='%s' size=%"PRIu64, bdev->bd_disk->disk_name, bdev_size(bdev));
-    
+
     struct file * file = _file_alloc();
     file->inode = &container_of(bdev, struct bdev_inode, bdev)->vfs_inode;
     return file;
@@ -3526,7 +3406,7 @@ static inline void
 del_gendisk(struct gendisk * disk)
 {
     spin_lock(&UMC_disk_list_lock);
-    list_del(&disk->disk_list);         /* remove from UMC_disk_list */
+    list_del(&disk->disk_list);		/* remove from UMC_disk_list */
     spin_unlock(&UMC_disk_list_lock);
     put_disk(disk);
     kfree(disk->disk_name);
@@ -3563,9 +3443,9 @@ add_disk(struct gendisk * disk)
 /*** Block I/O ***/
 
 struct bio_vec {
-        struct page     *bv_page;
-        unsigned int    bv_len;
-        unsigned int    bv_offset;
+	struct page     *bv_page;
+	unsigned int    bv_len;
+	unsigned int    bv_offset;
 };
 
 typedef void (bio_end_io_t) (struct bio *, int);
@@ -3609,10 +3489,10 @@ struct bio {
 
 /* bi_rw flag bit numbers */
 #define BIO_RW				0
-#define BIO_RW_FAILFAST			1   //XXX ? check 2.6.24 source
-#define BIO_RW_FAILFAST_DEV		1
-#define BIO_RW_FAILFAST_TRANSPORT	2
-#define BIO_RW_FAILFAST_DRIVER		3
+#define BIO_RW_FAILFAST_DEV		1   /* 2.6.32 */
+#define BIO_RW_FAILFAST_TRANSPORT	2   /* 2.6.32 */
+#define BIO_RW_FAILFAST_DRIVER		3   /* 2.6.32 */
+#define BIO_RW_FAILFAST			3   /* 2.6.24 */
 #define BIO_RW_AHEAD			4
 #define BIO_RW_BARRIER			5
 #define BIO_RW_SYNCIO			6
@@ -3621,7 +3501,7 @@ struct bio {
 #define BIO_RW_DISCARD			9
 #define BIO_RW_NOIDLE			10
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2, 6, 32)   //XXX still in 2.6.24, not 2.6.32
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2, 6, 32)   //XXX still in 2.6.26, not 2.6.32
 #define BIO_RW_SYNC			BIO_RW_SYNCIO
 #endif
 
@@ -3639,15 +3519,20 @@ struct bio {
 #define bio_get(bio)			atomic_inc(&(bio)->__bi_cnt)
 #define bio_endio(bio, err)		do { if ((bio)->bi_end_io) (bio)->bi_end_io((bio), (err)); } while (0)
 
-#define __bio_for_each_segment(bvl, bio, i, start_idx)                  \
-        for (bvl = bio_iovec_idx((bio), (start_idx)), i = (start_idx);  \
-             i < (bio)->bi_vcnt;                                        \
-             bvl++, i++)
+#define __bio_for_each_segment(bvl, bio, i, start_idx)			\
+	for (bvl = bio_iovec_idx((bio), (start_idx)), i = (start_idx);  \
+	     i < (bio)->bi_vcnt;					\
+	     bvl++, i++)
 
-#define bio_for_each_segment(bvl, bio, i)                               \
-        __bio_for_each_segment(bvl, bio, i, (bio)->bi_idx)
+#define bio_for_each_segment(bvl, bio, i)				\
+	__bio_for_each_segment(bvl, bio, i, (bio)->bi_idx)
 
 #define bio_kmalloc(gfp, maxvec)	bio_alloc((gfp), (maxvec))
+
+static inline sector_t blk_rq_pos(const struct request *rq)
+{
+    return rq->bio ? rq->bio->bi_sector : 0;
+}
 
 struct bio_set;
 
@@ -3714,17 +3599,17 @@ bio_clone(struct bio * bio, gfp_t gfp)
 static inline void
 __bio_add_page(struct bio *bio, struct page *page, unsigned int len, unsigned int off)
 {
-        struct bio_vec *bv = &bio->bi_io_vec[bio->bi_vcnt];
+	struct bio_vec *bv = &bio->bi_io_vec[bio->bi_vcnt];
 
-        WARN_ON_ONCE(bio_flagged(bio, BIO_CLONED));
+	WARN_ON_ONCE(bio_flagged(bio, BIO_CLONED));
 	assert(bio->bi_vcnt < bio->bi_max_vecs);
 
-        bv->bv_page = page;
-        bv->bv_offset = off;
-        bv->bv_len = len;
+	bv->bv_page = page;
+	bv->bv_offset = off;
+	bv->bv_len = len;
 
-        bio->bi_size += len;
-        bio->bi_vcnt++;
+	bio->bi_size += len;
+	bio->bi_vcnt++;
 }
 
 /* Append a page (or part of a page) to the data area for the bio */
@@ -3793,7 +3678,7 @@ struct ts_state;
 /* do not #include <linux/socket.h> */
 
 struct sk_prot {
-    void                  (*disconnect)(struct sock *, int);
+    void		  (*disconnect)(struct sock *, int);
 };
 
 struct sock {
@@ -3814,7 +3699,7 @@ struct sock {
     unsigned char	    sk_userlocks:4;
 
     int			    sk_state;		    /* e.g. TCP_ESTABLISHED */
-    rwlock_t		    sk_callback_lock;	    /* protect changes to callbacks */	//XXX
+    rwlock_t		    sk_callback_lock;	    /* protect changes to callbacks */	//XXXXX
     void		  * sk_user_data;
     void		  (*sk_data_ready)(struct sock *, int); /* protocol callbacks */
     void		  (*sk_write_space)(struct sock *);
@@ -3890,7 +3775,7 @@ struct socket_ops {
     ssize_t (*sendpage)  (struct socket *, struct page *, int, size_t, int);
     int     (*setsockopt)(struct socket *, int, int, void *, int);
     int     (*getname)   (struct socket *, struct sockaddr *, socklen_t *addr_len, int peer);
-    int     (*bind)      (struct socket *, struct sockaddr *, socklen_t addr_len);
+    int     (*bind)	 (struct socket *, struct sockaddr *, socklen_t addr_len);
     int     (*connect)   (struct socket *, struct sockaddr *, socklen_t addr_len, int flags);
     int     (*listen)    (struct socket *, int len);
     int     (*accept)    (struct socket *, struct socket *, int flags, bool kern);
@@ -3906,12 +3791,12 @@ typedef enum { SS_unused } socket_state;
 struct socket {
     struct inode	    vfs_inode;
     socket_state	    state;
-    unsigned long           flags;
-    struct file             *file;
+    unsigned long	    flags;
+    struct file		  * file;
     struct sock		  * sk;			/* points at embedded sk_s */
     struct socket_ops     * ops;
     struct sock		    sk_s;
-    struct socket_ops       ops_s;
+    struct socket_ops	    ops_s;
 };
 
 #define SOCKET_I(inode)			({ assert_eq((inode)->UMC_type, I_TYPE_SOCK); \
@@ -3954,12 +3839,12 @@ extern void UMC_sock_xmit_event(void * env, uintptr_t events, error_t err);
 
 struct msghdr;
 extern ssize_t kernel_sendmsg(struct socket * sock, struct msghdr * msg,
-			      struct kvec * vec, int nvec, size_t nbytes);
+				struct kvec * vec, int nvec, size_t nbytes);
 
 #define sock_recvmsg(sock, msg, nb, f) \
 	    _sock_recvmsg((sock), (msg), (nb), (f), FL_STR)
 extern error_t _sock_recvmsg(struct socket * sock, struct msghdr * msg,
-	      size_t nbytes, int flags, sstring_t caller_id);
+		size_t nbytes, int flags, sstring_t caller_id);
 
 #define kernel_recvmsg(sock, msg, vec, nsg, nb, f) \
 	    _kernel_recvmsg((sock), (msg), (vec), (nsg), (nb), (f), FL_STR)
@@ -3990,7 +3875,7 @@ UMC_sock_init(struct socket * sock, struct file * file)
     wops->listen = UMC_sock_listen;
     wops->shutdown = UMC_sock_shutdown;
     wops->setsockopt = UMC_setsockopt;
-    wops->sendpage = sock_no_sendpage;	//XXXX perf
+    wops->sendpage = sock_no_sendpage;
     sock->sk->sk_prot->disconnect = UMC_sock_discon;
 
     /* State change callbacks to the application, delivered by event_task */
@@ -4028,7 +3913,7 @@ UMC_sock_poll_start(struct socket * sock, void (*recv)(struct sock *, int),
 	sock->sk->rd_poll_event_task = sock->sk->rd_poll_event_thread->event_task;
 	sock->sk->rd_poll_entry = sys_poll_enable(sock->sk->rd_poll_event_task,
 					  UMC_sock_recv_event, sock, sock->sk->fd,
-				          SYS_SOCKET_RECV_ET, "socket_recv_poll_entry");
+					  SYS_SOCKET_RECV_ET, "socket_recv_poll_entry");
     }
 }
 
@@ -4051,7 +3936,12 @@ _fget(unsigned int fd)
 static inline struct file *
 fget(unsigned int real_fd)
 {
-    struct file * file = _fget(dup(real_fd));  /* caller still owns the original fd */
+    int fd = dup(real_fd);
+    if (fd < 0) {
+	sys_warning("fget could not dup() incoming fd=%d err=%d", real_fd, errno);
+	return NULL;
+    }
+    struct file * file = _fget(fd);	/* caller still owns the original fd */
     struct socket * sock = SOCKET_I(file->inode);
     char thread_name[32];
     UMC_sock_filladdrs(sock);
@@ -4090,14 +3980,14 @@ struct fput_finish_work {
     struct work_struct		    work;
 };
 
-static void
+static inline void
 _fput_finish_work_fn(struct _irqthread * irqthread)
 {
     irqthread_stop(irqthread);
     irqthread_destroy(irqthread);
 }
 
-static void
+static inline void
 fput_finish_work_fn(struct work_struct * work)
 {
     struct fput_finish_work * ffw;
@@ -4177,8 +4067,8 @@ struct seq_file {
 struct seq_operations {
     void		      * (*start)(struct seq_file *, loff_t * pos);
     void		      * (*next)(struct seq_file *, void *, loff_t * pos);
-    void		        (*stop)(struct seq_file *, void *);
-    int 		        (*show)(struct seq_file *, void *);
+    void			(*stop)(struct seq_file *, void *);
+    int				(*show)(struct seq_file *, void *);
 };
 
 /* Format into a string and append to seq->reply */
@@ -4277,9 +4167,9 @@ seq_fmt(struct seq_file * const seq)
     list_item = seq->op->start(seq, &pos);
 
     while (list_item) {
-        error_t rc = seq->op->show(seq, list_item);
-        assert_eq(rc, E_OK);
-        list_item = seq->op->next(seq, list_item, &pos);
+	error_t rc = seq->op->show(seq, list_item);
+	assert_eq(rc, E_OK);
+	list_item = seq->op->next(seq, list_item, &pos);
     }
 
     seq->op->stop(seq, list_item);
@@ -4332,7 +4222,7 @@ struct proc_dir_entry {
 
 /* Application calls here to create/update PDE tree -- a NULL parent refers to the root node */
 extern struct proc_dir_entry * pde_create(char const *, umode_t, struct proc_dir_entry *,
-					        const struct file_operations *, void *);
+						const struct file_operations *, void *);
 
 extern struct proc_dir_entry * pde_remove(char const * name, struct proc_dir_entry * parent);
 
@@ -4345,7 +4235,7 @@ extern struct proc_dir_entry * pde_remove(char const * name, struct proc_dir_ent
 #define create_proc_entry(name, mode, parent) \
 		proc_create_data((name), (mode), (parent), NULL, NULL)
 
-#define proc_mkdir(name, parent)	      \
+#define proc_mkdir(name, parent)	    \
 		proc_create_data((name), PROC_DIR_UMODE, (parent), NULL, NULL)
 
 #define PROC_ROOT_UMODE			(S_IFDIR | 0555)
@@ -4370,14 +4260,14 @@ struct proc_dir_entry * pde_module_param_remove(char const * name);
  */
 #define module_param_named(procname, varname, vartype, modeperms) \
  extern void CONCAT(UMC_param_create_, procname)(void); \
-        void CONCAT(UMC_param_create_, procname)(void)  \
+	void CONCAT(UMC_param_create_, procname)(void)  \
 	{ \
 	    assert_eq(sizeof(vartype), sizeof(varname)); \
 	    pde_module_param_create(#procname, &varname, sizeof(varname), (modeperms)); \
 	} \
  \
  extern void CONCAT(UMC_param_remove_, procname)(void); \
-        void CONCAT(UMC_param_remove_, procname)(void)  \
+	void CONCAT(UMC_param_remove_, procname)(void)  \
 	{ \
 	    assert_eq(sizeof(vartype), sizeof(varname)); \
 	    struct proc_dir_entry * pde = pde_module_param_remove(#procname); \
@@ -4413,6 +4303,9 @@ struct scatterlist {
 #define sg_page(sg)			((struct page *)       ((sg)->page_link & ~_SG_PTR_FLAGS))
 #define sg_assign_page(sg, page) \
 	    ((sg)->page_link = ((uintptr_t)(page) | ((sg)->page_link & _SG_PTR_FLAGS)))
+
+#define sg_copy_to_buffer(sgl, sg_count, buf, buflen)	UMC_STUB(sg_copy_to_buffer)
+#define sg_copy_from_buffer(sgl, sg_count, buf, buflen)	UMC_STUB(sg_copy_from_buffer)
 
 struct page;
 
@@ -4483,12 +4376,11 @@ extern void genl_rcv(struct sk_buff *skb);
 
 /*** Netlink (implemented as UDP/IPv4) ***/
 
-#include <linux/netlink.h>			//XXX
+#include <linux/netlink.h>
 
 #define UMC_NETLINK_PORT 1234u	/* UDP port for simulated netlink */
 
 extern int netlink_rcv_skb(struct sk_buff *skb, int (*cb)(struct sk_buff *, struct nlmsghdr *));
-
 extern error_t netlink_xmit(struct sock *sk, struct sk_buff *skb, u32 pid, u32 group, int nonblock);
 
 #define netlink_unicast(sk, skb, pid, nonblock) \
@@ -4523,11 +4415,21 @@ extern struct net init_net;
 #define SLAB_PANIC			0x00040000UL
 struct genl_family;
 #include <net/genetlink.h>
-#include <linux/rbtree.h>
+
+#if 0	    //XXX crc32c
+#include <linux/crc32c.h>		// lib/libcrc32c.c
+#else
+extern uint32_t crc32c_uniq;		//XXXX hack makes these unique -- not good for matching
+#define crc32c(x, y, z)			(++crc32c_uniq)	//XXXX
+#endif
+
+/* There are here mainly to keep them compiling */
 #include <linux/idr.h>
+#include <linux/rbtree.h>
+#include <linux/ioctl.h>
+#include <linux/swab.h>
 
 /*** Sleepable rw_semaphore ***/
-
 struct rw_semaphore {
     rwlock_t				rwlock;
     wait_queue_head_t			waitq;
@@ -4595,10 +4497,6 @@ struct ahash_request { };
 ////// Stub out some definitions unused in usermode builds		  //////
 ////////////////////////////////////////////////////////////////////////////////
 
-extern uint32_t crc32c_uniq;	//XXXX hack makes these unique -- not good for matching
-#define crc32c(x, y, z)			(++crc32c_uniq)	//XXXX
-#define crc_t10dif(data, len)		E_OK		//XXXX
-
 typedef void dlm_lockspace_t;
 struct dlm_lksb { };
 
@@ -4626,7 +4524,6 @@ ib_create_cq(struct ib_device *device, ib_comp_handler comp_handler,
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 32)
 #define ib_alloc_pd(device, flags)	NULL	//XXX
-#define COMPAT_IB_ALLOC_PD_HAS_2_PARAMS	//XXX for drbd
 #else
 #define ib_alloc_pd(device)		NULL	//XXX
 #endif
@@ -4664,30 +4561,46 @@ struct shrink_control { int nr_to_scan; };
 
 #define ENABLE_CLUSTERING		1   /* nonzero */
 
-#if 0	    //XXX investigate
-#include "linux/bitrev.h"
-#include "linux/cpumask.h"
-#include "linux/ctype.h"
-#include "linux/kobject.h"
-#include "linux/kref.h"
-#include "linux/parser.h"
-#include "linux/plist.h"
-#include "linux/prio_heap.h"
-#include "linux/prio_tree.h"
-#include "linux/proportions.h"
-#include "linux/radix-tree.h"
-#include "linux/ratelimit.h"
-#include "linux/rational.h"
-#include "linux/reciprocal_div.h"
-#include "linux/rwsem.h"
-#include "linux/rwsem-spinlock.h"
-#include "linux/sort.h"
-#include "linux/crc16.h"
-#include "linux/crc32.h"
-#include "linux/crc7.h"
-#include "linux/crc-ccitt.h"
-#include "linux/crc-itu-t.h"
-#include "linux/crc-t10dif.h"
-#endif
-
 #endif	/* USERMODE_LIB_H */
+
+//  227 /********** Basic **********/
+//  327 /*** Time ***/
+//  398 /*** Strings ***/
+//  411 /*** Modules ***/
+//  465 /*** Memory ***/
+//  759 /*** Formatting and logging ***/
+//  789 /*** Usermode helper ***/
+//  819 /********** Barriers, Atomics, Locking **********/
+//  890 /*** Bitmap (non-atomic) ***/
+//  915 /*** spin lock ***/
+// 1146 /*** Sleepable mutex lock ***/
+// 1257 /*** Sleepable semaphore ***/
+// 1306 /*** RCU Synchronization (faked using rw_lock) ***/
+// 1365 /*** kref ***/
+// 1409 /*** kobj ***/
+// 1477 /********** Tasks and Scheduling **********/
+// 1605 /*** Wait Queue -- wait (if necessary) for a condition to be true ***/
+// 1659 /*** Completion ***/
+// 1696 /*** Kthread (simulated kernel threads) ***/
+// 1806 /*** Waiting ***/
+// 2240 /*** Tasklet ***/
+// 2303 /*** Event thread (used for timers and "softirq" asynchronous notifications) ***/
+// 2398 /*** Timer ***/
+// 2472 /*** Work Queue ***/
+// 2579 /********** I/O **********/
+// 2581 /*** Page Structure ***/
+// 2789 /*** Request Queue ***/
+// 2870 /*** inode ***/
+// 2915 /*** file ***/
+// 2957 /*** Files on disk, or real block devices ***/
+// 3075 /*** Device ***/
+// 3115 /*** Block Device ***/
+// 3245 /*** gendisk ***/
+// 3443 /*** Block I/O ***/
+// 3666 /*** Sockets ***/
+// 4030 /*** seq ops for /proc and /sys ***/
+// 4284 /*** Scatter/gather ***/
+// 4373 /********** Misc **********/
+// 4377 /*** Netlink (implemented as UDP/IPv4) ***/
+// 4432 /*** Sleepable rw_semaphore ***/
+// 4454 /*** Hashing and Crypto ***/
