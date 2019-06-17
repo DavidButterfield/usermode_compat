@@ -214,6 +214,10 @@ _find_next_bit(const unsigned long *src, unsigned long nbits, unsigned long star
 #define	find_first_bit(src, nbits)		    find_next_bit(src, nbits, 0)
 #define	find_first_zero_bit(src, nbits)		    find_next_zero_bit(src, nbits, 0)
 
+
+
+
+
 #include <linux/kernel.h>   /* linux/kernel.h is the first kernel header file to #include */
 
 /* UMC_kernel.h should be included ahead of any kernel headers except linux/kernel.h */
@@ -221,7 +225,6 @@ _find_next_bit(const unsigned long *src, unsigned long nbits, unsigned long star
 
 #include <sys/syscall.h>    /* ends up including a kernel header XXXX */
 
-#include <asm/unaligned.h>
 #include <linux/list.h>
 
 /********** Basic **********/
@@ -247,16 +250,18 @@ extern _PER_THREAD size_t UMC_size_t_JUNK;   /* avoid unused-value gcc warnings 
 /* For stubbing out unused functions, macro arguments, etc */
 #define IGNORED				0
 #define DO_NOTHING(USED...)		do { USED; } while (0)
+
+/* For stubbing out functions that if someone calls them we want to know */
 #define UMC_STUB_STR			"XXX XXX XXX XXX XXX UNIMPLEMENTED"
 #define UMC_STUB(fn, ret...)		({ WARN_ONCE(true, UMC_STUB_STR "FUNCTION %s\n", #fn); \
 					  (UMC_size_t_JUNK=(uintptr_t)IGNORED), ##ret;})
 
-/* Avoid compiler warnings for stubbed-out macro arguments */
+/* Avoid compiler warnings for unused stubbed-out macro arguments */
 #define _USE(x)				({ if (0 && (uintptr_t)(x)==0) {}; 0; })
 
 #define kvec				iovec
-#define UIO_FASTIOV     8
-#define UIO_MAXIOV      1024
+#define UIO_FASTIOV			8
+#define UIO_MAXIOV			1024
 
 #define hash_long(val, ORDER)		(     (long)(val) % ( 1ul << (ORDER) ) )
 #define hash_32(val, ORDER)		( (uint32_t)(val) % ( 1ul << (ORDER) ) )
@@ -4372,9 +4377,26 @@ sg_free_table(struct sg_table *table)
 
 /********** Misc **********/
 
-extern void genl_rcv(struct sk_buff *skb);
+/*** Unaligned access ***/
+
+#define _LINUX_UNALIGNED_ACCESS_OK_H	    /* avoid access_ok.h */
+#define _DIRTY	__attribute__((__no_sanitize_undefined__))
+static inline _DIRTY uint16_t get_unaligned_be16(void const * p) { return __builtin_bswap16(*(uint16_t const *)p); }
+static inline _DIRTY uint32_t get_unaligned_be32(void const * p) { return __builtin_bswap32(*(uint32_t const *)p); }
+static inline _DIRTY uint64_t get_unaligned_be64(void const * p) { return __builtin_bswap64(*(uint64_t const *)p); }
+static inline _DIRTY uint16_t get_unaligned_le16(void const * p) { return                  (*(uint16_t const *)p); }
+static inline _DIRTY uint32_t get_unaligned_le32(void const * p) { return                  (*(uint32_t const *)p); }
+static inline _DIRTY uint64_t get_unaligned_le64(void const * p) { return                  (*(uint64_t const *)p); }
+static inline _DIRTY void put_unaligned_be16(uint16_t v, void * p) { *(uint16_t *)p = __builtin_bswap16(v); }
+static inline _DIRTY void put_unaligned_be32(uint32_t v, void * p) { *(uint32_t *)p = __builtin_bswap32(v); }
+static inline _DIRTY void put_unaligned_be64(uint64_t v, void * p) { *(uint64_t *)p = __builtin_bswap64(v); }
+static inline _DIRTY void put_unaligned_le16(uint16_t v, void * p) { *(uint16_t *)p =                  (v); }
+static inline _DIRTY void put_unaligned_le32(uint32_t v, void * p) { *(uint32_t *)p =                  (v); }
+static inline _DIRTY void put_unaligned_le64(uint64_t v, void * p) { *(uint64_t *)p =                  (v); }
 
 /*** Netlink (implemented as UDP/IPv4) ***/
+
+extern void genl_rcv(struct sk_buff *skb);
 
 #include <linux/netlink.h>
 
@@ -4562,45 +4584,3 @@ struct shrink_control { int nr_to_scan; };
 #define ENABLE_CLUSTERING		1   /* nonzero */
 
 #endif	/* USERMODE_LIB_H */
-
-//  227 /********** Basic **********/
-//  327 /*** Time ***/
-//  398 /*** Strings ***/
-//  411 /*** Modules ***/
-//  465 /*** Memory ***/
-//  759 /*** Formatting and logging ***/
-//  789 /*** Usermode helper ***/
-//  819 /********** Barriers, Atomics, Locking **********/
-//  890 /*** Bitmap (non-atomic) ***/
-//  915 /*** spin lock ***/
-// 1146 /*** Sleepable mutex lock ***/
-// 1257 /*** Sleepable semaphore ***/
-// 1306 /*** RCU Synchronization (faked using rw_lock) ***/
-// 1365 /*** kref ***/
-// 1409 /*** kobj ***/
-// 1477 /********** Tasks and Scheduling **********/
-// 1605 /*** Wait Queue -- wait (if necessary) for a condition to be true ***/
-// 1659 /*** Completion ***/
-// 1696 /*** Kthread (simulated kernel threads) ***/
-// 1806 /*** Waiting ***/
-// 2240 /*** Tasklet ***/
-// 2303 /*** Event thread (used for timers and "softirq" asynchronous notifications) ***/
-// 2398 /*** Timer ***/
-// 2472 /*** Work Queue ***/
-// 2579 /********** I/O **********/
-// 2581 /*** Page Structure ***/
-// 2789 /*** Request Queue ***/
-// 2870 /*** inode ***/
-// 2915 /*** file ***/
-// 2957 /*** Files on disk, or real block devices ***/
-// 3075 /*** Device ***/
-// 3115 /*** Block Device ***/
-// 3245 /*** gendisk ***/
-// 3443 /*** Block I/O ***/
-// 3666 /*** Sockets ***/
-// 4030 /*** seq ops for /proc and /sys ***/
-// 4284 /*** Scatter/gather ***/
-// 4373 /********** Misc **********/
-// 4377 /*** Netlink (implemented as UDP/IPv4) ***/
-// 4432 /*** Sleepable rw_semaphore ***/
-// 4454 /*** Hashing and Crypto ***/

@@ -136,7 +136,7 @@ DIR := $(shell /bin/pwd)
 
 kcopy:	_include _klib
 	@# These have been modified from the 2.6.32 reference kernel
-	@ cp kincl_mod/netlink.h	    include/net/
+	@ cp kincl_mod/netlink.h    include/net/
 	@ cp kincl_mod/kernel.h	    include/linux/
 	@ cp kincl_mod/types.h	    include/linux/
 	@# These don't exist unless you have built the reference kernel
