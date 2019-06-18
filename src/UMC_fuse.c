@@ -114,13 +114,15 @@ pde_node_remove(char const * name, struct proc_dir_entry * parent)
 static ssize_t
 pde_node_fmt(struct proc_dir_entry * pde, char * buf, size_t size, off_t * lofsp)
 {
-    struct file * file = _file_alloc();
-    file->inode = alloc_inode(0);
+    error_t err;
+    struct proc_inode *pi = record_alloc(pi);
+    struct file * file = record_alloc(file);
+
+    file->inode = &pi->vfs_inode;
     init_inode(file->inode, I_TYPE_PROC, pde->mode, 0, 0);
     file->inode->UMC_fd = -1;
-    PROC_I(file->inode)->pde = pde;
-
-    error_t err;
+    assert_eq(PROC_I(file->inode), pi);
+    pi->pde = pde;
 
     err = pde->proc_fops->open(file->inode, file);
     expect_noerr(err, "pde[%s]->proc_fops->open", pde->name);
@@ -133,6 +135,7 @@ pde_node_fmt(struct proc_dir_entry * pde, char * buf, size_t size, off_t * lofsp
     expect_noerr(err, "pde[%s]->proc_fops->release", pde->name);
 
     record_free(file);
+    record_free(pi);
 
     return bytes_read;
 }
@@ -304,11 +307,14 @@ pde_write(struct proc_dir_entry * pde_root, char const * path,
     /* These nodes aren't supposed to be writable, but superuser can still get here */
     if (!pde->proc_fops->write) return -EPERM;
 
-    struct file * file = _file_alloc();
-    file->inode = alloc_inode(0);
-    init_inode(file->inode, I_TYPE_PROC, 0666, size, 0);
+    struct proc_inode *pi = record_alloc(pi);
+    struct file * file = record_alloc(file);
+
+    file->inode = &pi->vfs_inode;
+    init_inode(file->inode, I_TYPE_PROC, 0666, 0, 0);
     file->inode->UMC_fd = -1;
-    PROC_I(file->inode)->pde = pde;
+    assert_eq(PROC_I(file->inode), pi);
+    pi->pde = pde;
 
     err = pde->proc_fops->open(file->inode, file);
     expect_noerr(err, "pde[%s]->proc_fops->open", pde->name);
@@ -325,6 +331,7 @@ pde_write(struct proc_dir_entry * pde_root, char const * path,
     expect_noerr(err, "pde[%s]->proc_fops->release", pde->name);
 
     record_free(file);
+    record_free(pi);
 
     pde->mtime = time(NULL);
     return ret;
@@ -423,8 +430,8 @@ UMC_fuse_run(void * unused)
 
     /* XXXX setup UMC_fuse "current" -- change this to start a "kernel thread" */
     struct task_struct * task = UMC_current_alloc();
-    UMC_current_init(task, sys_thread_current(), (void *)UMC_fuse_run, unused,
-		     kstrdup("UMC_fuse thread", IGNORED));
+    UMC_current_init(task, sys_thread_current(), (void *)UMC_fuse_run,
+			    unused, "UMC_fuse thread");
     UMC_current_set(task);
 
     char /*const*/ * UMC_fuse_argv[] = {

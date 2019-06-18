@@ -496,7 +496,7 @@ extern void si_meminfo(struct sysinfo *si);
 #define __GFP_NOFAIL		((gfp_t)0x800u)
 #define __GFP_NORETRY		((gfp_t)0x1000u)
 // #define __GFP_COMP		((gfp_t)0x4000u)
-#define __GFP_ZERO		((gfp_t)0x8000u)
+#define __GFP_ZERO		((gfp_t)0x8000u)    /* not ignored */
 // #define __GFP_NOMEMALLOC	((gfp_t)0x10000u)
 #define __GFP_HARDWALL		((gfp_t)0x20000u)
 // #define __GFP_THISNODE	((gfp_t)0x40000u)
@@ -525,7 +525,7 @@ extern void si_meminfo(struct sysinfo *si);
 #define vrealloc(oaddr, nsize)		sys_mem_realloc((oaddr), (nsize))
 #define vfree(addr)			sys_mem_free(addr)
 
-#define kalloc(size, gfp)		(_USE(gfp), vmalloc(size))
+#define kalloc(size, gfp)		(((gfp) & __GFP_ZERO) ? vzalloc(size) : vmalloc(size))
 #define kzalloc(size, gfp)		(_USE(gfp), vzalloc(size))
 #define kzalloc_node(size, gfp, nodeid) (_USE(nodeid), kzalloc((size), (gfp)))
 
@@ -559,16 +559,17 @@ extern void si_meminfo(struct sysinfo *si);
 #define free_page(addr)			free_pages((addr), 0)
 #define free_pages(addr, order)		kfree((void *)addr)
 
-//XXX ADD mem_buf_allocator_set() to the sys_services API
-extern void _mem_buf_allocator_set(void * buf, sstring_t caller_id);
 #ifdef VALGRIND
 #define ARENA_DISABLE 1
 #else
 #define ARENA_DISABLE 0
 #endif
+
+//XXX ADD mem_buf_allocator_set() to the sys_services API
 #if ARENA_DISABLE
 #define mem_buf_allocator_set(buf, caller_id) DO_NOTHING()
 #else
+extern void _mem_buf_allocator_set(void * buf, sstring_t caller_id);
 #define mem_buf_allocator_set(buf, caller_id) _mem_buf_allocator_set((buf), (caller_id))
 #endif
 
@@ -601,7 +602,8 @@ extern void _mem_buf_allocator_set(void * buf, sstring_t caller_id);
 
 #define kmem_cache_alloc_node(cache, gfp, nodeid) (_USE(nodeid), kmem_cache_alloc(cache, (gfp)))
 
-#define kmem_cache_alloc(cache, gfp)	(_USE(gfp), (void *)sys_buf_alloc(cache))
+#define kmem_cache_alloc(cache, gfp)	(((gfp) & __GFP_ZERO) ? (void *)sys_buf_zalloc(cache) \
+							      : (void *)sys_buf_alloc(cache))
 #define kmem_cache_zalloc(cache, gfp)	(_USE(gfp), (void *)sys_buf_zalloc(cache))
 #define kmem_cache_free(cache, ptr)	(_USE(cache), sys_buf_drop((sys_buf_t)(ptr)))
 #define kmem_cache_size(cache)		((unsigned)(-1));   //XXXX bigger than you need
@@ -687,10 +689,10 @@ mempool_create(unsigned int min_nr, void * (*alloc_fn)(gfp_t, void *),
 /* slab_pool allocates from a kmem_cache provided on create */
 
 static inline void *
-mempool_alloc_slab(gfp_t ignored, void * kcache_v)
+mempool_alloc_slab(gfp_t gfp, void * kcache_v)
 {
     struct kmem_cache * kcache = kcache_v;
-    return kmem_cache_alloc(kcache, ignored);
+    return kmem_cache_alloc(kcache, gfp);
 }
 
 static inline void
@@ -1542,16 +1544,16 @@ cpumask_equal(const cpumask_t *src1p, const cpumask_t *src2p)
 }
 
 static inline bool
-alloc_cpumask_var(cpumask_var_t *mask, gfp_t flags)
+alloc_cpumask_var(cpumask_var_t *mask, gfp_t gfp)
 {
     assert_static(NR_CPUS <= BITS_PER_LONG);
     return true;
 }
 
 static inline bool
-zalloc_cpumask_var(cpumask_var_t *mask, gfp_t flags)
+zalloc_cpumask_var(cpumask_var_t *mask, gfp_t gfp)
 {
-    bool ret = alloc_cpumask_var(mask, flags);
+    bool ret = alloc_cpumask_var(mask, gfp);
     if (ret)
 	memset(mask, 0, sizeof(cpumask_var_t));
     return ret;
@@ -1726,7 +1728,7 @@ struct task_struct {
     /* kernel code compatibility */
     cpumask_t		    cpus_allowed;
     bool	   volatile should_stop;    /* kthread shutdown signalling */
-    char		    comm[TASK_COMM_LEN];    /* thread name */
+    char		    comm[1+TASK_COMM_LEN];  /* thread name */
     pid_t		    pid;	    /* tid, actually */
     int			    flags;	    /* ignored */
     void		  * io_context;	    /* unused */
@@ -2157,7 +2159,7 @@ _kthread_create(error_t (*fn)(void * env), void * env, string_t name, sstring_t 
     if (err != E_OK) {
 	/* Failed to start */
 	sys_thread_free(task->SYS);
-	record_free(task);
+	UMC_current_free(task);
 	return ERR_PTR(err);
     }
 
@@ -2545,7 +2547,7 @@ static inline void
 destroy_workqueue(struct workqueue_struct * workq)
 {
     kthread_stop(workq->owner);
-    vfree(workq);
+    record_free(workq);
 }
 
 #define queue_work(WORKQ, WORK)	\
@@ -2602,7 +2604,6 @@ extern struct list_head UMC_pagelist;
 extern spinlock_t UMC_pagelist_lock;
 
 #define page_address(page)		((page)->vaddr)
-//XXXXXXXXXXX#define page_to_phys(page)		page_address(page)  /* userspace */
 #define page_count(page)		kref_read(&(page)->kref)
 #define page_private(page)		((page)->private)
 #define set_page_private(page, v)	((page)->private = (v))
@@ -2733,15 +2734,15 @@ extern struct page zero_page;
 /* page_pool uses a pair of pools for the struct pages and the data pages */
 
 static inline void *
-_page_pool_alloc(gfp_t ignored, void * mp_v)
+_page_pool_alloc(gfp_t gfp, void * mp_v)
 {
     mempool_t * mp = mp_v;
-    struct page * page = kmem_cache_alloc(mp->pool_data3, ignored);
+    struct page * page = kmem_cache_alloc(mp->pool_data3, gfp);
     expect_eq(mp->private, 0);	/* only order zero for now */
     kref_init(&page->kref);
     mutex_init(&page->lock);
     page->order = mp->private;
-    page_address(page) = kmem_cache_alloc(mp->pool_data2, ignored);
+    page_address(page) = kmem_cache_alloc(mp->pool_data2, gfp);
 
     spin_lock(&UMC_pagelist_lock);
     list_add(&page->UMC_page_list, &UMC_pagelist);
@@ -2880,7 +2881,7 @@ struct inode {
     umode_t		    i_mode;	/* e.g. S_ISREG */
     size_t		    i_size;	/* device or file size in bytes */
     dev_t		    i_rdev;
-    struct block_device	  * i_bdev;
+    struct block_device   * i_bdev;
     int			    UMC_type;
     uint32_t		    i_flags;
     unsigned int	    i_blkbits;	/* log2(block_size) */
@@ -2899,15 +2900,8 @@ struct inode {
     (inode)->i_mode = (mode); \
     (inode)->i_size = (size); \
     (inode)->i_flags = (oflags); \
+    mutex_init(&(inode)->i_mutex); \
 } while (0)
-
-static inline struct inode *
-alloc_inode(void * ignored)
-{
-    struct inode * ret = record_alloc(ret);
-    mutex_init(&ret->i_mutex);
-    return ret;
-}
 
 struct dentry {
     struct inode	      * d_inode;
@@ -2950,14 +2944,6 @@ struct address_space {
 
 #define file_inode(file)		((file)->inode)
 #define file_accessed(filp)		DO_NOTHING()
-
-/* The first argument is a real usermode fd */
-static inline struct file *
-_file_alloc(void)
-{
-    struct file * file = record_alloc(file);
-    return file;
-}
 
 /*** Files on disk, or real block devices ***/
 
@@ -3005,8 +2991,8 @@ filp_open_real(string_t name, int flags, umode_t mode)
     sys_notice("name='%s' fd=%d statbuf.st_size=%"PRIu64" lseek_end_ofs=%"PRId64"/0x%"PRIx64,
 		name, fd, statbuf.st_size, lseek_end_ofs, lseek_end_ofs);
 
-    struct file * file = _file_alloc();
-    file->inode = alloc_inode(0);
+    struct file * file = record_alloc(file);
+    file->inode = record_alloc(file->inode);
     init_inode(file->inode, I_TYPE_FILE, statbuf.st_mode, statbuf.st_size, flags);
     file->inode->UMC_fd = fd;
     return file;
@@ -3187,45 +3173,44 @@ struct block_device {
     unsigned int	    bd_block_size;
 };
 
-struct bdev_inode {
-    struct block_device			bdev;
-    struct inode			vfs_inode;
-};
-
 #define block_size(bdev)		((bdev)->bd_block_size)
 #define bdev_size(bdev)			((bdev)->bd_disk->part0.nr_sects * 512)
 
 #define BDEV_I(inode)			({ assert_eq((inode)->UMC_type, I_TYPE_BDEV); \
-					   &container_of(inode, struct bdev_inode, vfs_inode)->bdev; \
+					   (inode)->i_bdev; \
 					})
 
 /* Create a block device */
 static inline struct block_device *
 bdget(dev_t devt)
 {
-    struct bdev_inode * bi = record_alloc(bi);
-    struct block_device * bdev = &bi->bdev;
-    struct inode * inode = &bi->vfs_inode;
+    struct block_device * bdev = record_alloc(bdev);
+    struct inode * inode = record_alloc(inode);
 
     size_t size = 0;
     mode_t mode = 0444 | S_IFBLK;
 
     init_inode(inode, I_TYPE_BDEV, mode, size, 0);
-    mutex_init(&inode->i_mutex);
-    inode->i_rdev = devt;
     inode->i_bdev = bdev;
+    inode->i_rdev = devt;
     inode->UMC_fd = -1;
 
     bdev->bd_inode = inode;
 
+    assert_eq(BDEV_I(inode), bdev);
     return bdev;
 }
 
-//XXXXX Figure out bd refcounting
-//XXXXX #define bdput(bd)		iput((bdev)->bd_inode)
-					//mutex_destroy(&file->inode->i_mutex);
-//#define bdput(bd)			record_free(container_of((bd), struct bdev_inode, bdev))   //XXX use inode refcount?
-#define bdput(bd)			do { /* leak XXXXXX */ } while (0)
+/* bdput is not the opposite of bdget */
+#if 0		//XXXX Fix bd and inode refcounting
+#define bdput(bd)			do {					    \
+					    mutex_destroy(&bd->bd_inode->i_mutex);  \
+					    record_free(bd->bd_inode);		    \
+					    record_free(bd);			    \
+					} while (0)
+#else
+#define bdput(bd)			do { /* XXXX leak */ } while (0)
+#endif
 
 #define bdev_get_queue(bdev)		((bdev)->bd_disk->queue)
 #define bdev_discard_alignment(bdev)	bdev_get_queue(bdev)->limits.discard_alignment
@@ -3302,6 +3287,7 @@ lookup_bdev(const char * path)
     return ret;
 }
 
+//XXX exclusivity
 static inline struct block_device *
 open_bdev_exclusive(const char *path, fmode_t mode, void *holder)
 {
@@ -3315,7 +3301,7 @@ open_bdev_exclusive(const char *path, fmode_t mode, void *holder)
 
     if ((mode & FMODE_WRITE) && bdev_read_only(bdev)) {
 	    sys_warning("****************** bdev %s says it is readonly", path);
-	    //XXXXX bdput(bdev);
+	    bdput(bdev);
 	    return ERR_PTR(-EACCES);
     }
 
@@ -3324,12 +3310,12 @@ open_bdev_exclusive(const char *path, fmode_t mode, void *holder)
     assert(bdev->bd_disk->fops);
     assert(bdev->bd_disk->fops->release);
 
-    //XXXXX take reference on inode
+    //XXXXX take reference on inode (while locked for lookup)
 
     int error = bdev->bd_disk->fops->open(bdev, mode);
     if (error) {
 	sys_warning("****************** bdev %s failed fops->open() %d", path, error);
-	//XXXXX bdput(bdev);
+	bdput(bdev);
 	return ERR_PTR(error);
     }
 
@@ -3363,8 +3349,8 @@ filp_open_bdev(string_t name, int inflags)
 
     sys_notice("name='%s' size=%"PRIu64, bdev->bd_disk->disk_name, bdev_size(bdev));
 
-    struct file * file = _file_alloc();
-    file->inode = &container_of(bdev, struct bdev_inode, bdev)->vfs_inode;
+    struct file * file = record_alloc(file);
+    file->inode = bdev->bd_inode;
     return file;
 }
 
@@ -3372,7 +3358,7 @@ static inline void
 filp_close_bdev(struct file * file)
 {
     assert_eq(file->inode->UMC_type, I_TYPE_BDEV);
-    close_bdev_exclusive(file->inode->i_bdev, file->inode->i_mode);
+    close_bdev_exclusive(BDEV_I(file->inode), file->inode->i_mode);
     record_free(file);
 }
 
@@ -3414,7 +3400,6 @@ del_gendisk(struct gendisk * disk)
     list_del(&disk->disk_list);		/* remove from UMC_disk_list */
     spin_unlock(&UMC_disk_list_lock);
     put_disk(disk);
-    kfree(disk->disk_name);
     record_free(disk);
 }
 
@@ -3927,10 +3912,9 @@ UMC_sock_poll_start(struct socket * sock, void (*recv)(struct sock *, int),
 static inline struct file *
 _fget(unsigned int fd)
 {
-    struct file * file = _file_alloc();
+    struct file * file = record_alloc(file);
     struct socket * sock = record_alloc(sock);
     file->inode = &sock->vfs_inode;
-    mutex_init(&file->inode->i_mutex);
     init_inode(file->inode, I_TYPE_SOCK, 0, 0, 0);
     file->inode->UMC_fd = fd;
     UMC_sock_init(SOCKET_I(file->inode), file);
@@ -4026,8 +4010,8 @@ fput(struct file * sockfile)
 
     sys_notice("CLOSE socket fd=%d", sockfile->inode->UMC_fd);
     close(sockfile->inode->UMC_fd);
-    vfree(SOCKET_I(sockfile->inode));	//XXX yuck
-    vfree(sockfile);
+    record_free(SOCKET_I(sockfile->inode));
+    record_free(sockfile);
 }
 
 #define sock_release(sock)		fput((sock)->file)
@@ -4035,7 +4019,7 @@ fput(struct file * sockfile)
 /*** seq ops for /proc and /sys ***/
 
 struct proc_inode {
-    struct kobject * kobj;		/* 2.6.26 */
+    struct kobject * kobj;		/* 2.6.26 */	//XXXXX
     struct inode			vfs_inode;
     struct proc_dir_entry * pde;	/* 2.6.24 */
 };
@@ -4109,7 +4093,7 @@ seq_release(struct inode * const unused, struct file * const file)
 {
     struct seq_file * seq_file = file->private_data;
     file->private_data = NULL;
-    kfree(seq_file);
+    record_free(seq_file);
     return E_OK;
 }
 
@@ -4130,7 +4114,7 @@ single_release(struct inode * const inode, struct file * const file)
 {
     const struct seq_operations *op = ((struct seq_file *)file->private_data)->op;
     int rc = seq_release(inode, file);
-    vfree(op);
+    record_free(op);
     return rc;
 }
 
@@ -4395,6 +4379,8 @@ static inline _DIRTY void put_unaligned_le32(uint32_t v, void * p) { *(uint32_t 
 static inline _DIRTY void put_unaligned_le64(uint64_t v, void * p) { *(uint64_t *)p =                  (v); }
 
 /*** Netlink (implemented as UDP/IPv4) ***/
+
+//XXXXX fix leak: netlink skbs are not getting freed
 
 extern void genl_rcv(struct sk_buff *skb);
 

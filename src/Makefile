@@ -8,13 +8,13 @@ ifndef REF_KERNEL
 REF_KERNEL := $(shell /bin/pwd)/../../linux-2.6.32.27
 endif
 
-MY_CFLAGS += -DDEBUG
+# MY_CFLAGS += -DDEBUG
 # MY_CFLAGS += -fsanitize=undefined
 # MY_CFLAGS += -DNDEBUG
 # MY_CFLAGS += -DTRACE_TRACE
 # MY_CFLAGS += -DTRACE_VERBOSE
 
-MY_CFLAGS += -O0
+# MY_CFLAGS += -O0
 # MY_CFLAGS += -Og
 # MY_CFLAGS += -O1
 # MY_CFLAGS += -O2
@@ -102,14 +102,14 @@ install:
 	@echo "***** Manually copy MTE header files into /usr/include or set Makefile SYS_SERVICE_INCL to point at MTE/trunk/include *****" ; exit 1
 
 %.o: %.c Makefile | check_include check_MTE
-	$(CC) -c -o $@ $(CFLAGS) $(MY_CFLAGS) $<
+	$(CC) -c -o $@ $(CFLAGS) $(MY_CFLAGS) $(EXTRA_CFLAGS) $<
 
 ifeq (.depend,$(wildcard .depend))
 -include .depend
 endif
 
 .depend:
-	$(CC) -M $(CFLAGS) $(MY_CFLAGS) $(SRCS_D) > $@
+	$(CC) -M $(CFLAGS) $(MY_CFLAGS) $(EXTRA_CFLAGS) $(SRCS_D) > $@
 
 clean:
 	rm -f *.o .depend

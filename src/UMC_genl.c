@@ -397,7 +397,7 @@ int genl_register_family(struct genl_family *family)
 	}
 
 	if (family->maxattr) {
-		family->attrbuf = kmalloc((family->maxattr+1) *
+		family->attrbuf = kzalloc((family->maxattr+1) *
 					sizeof(struct nlattr *), GFP_KERNEL);
 		if (family->attrbuf == NULL) {
 			err = -ENOMEM;
