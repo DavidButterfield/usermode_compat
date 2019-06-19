@@ -24,13 +24,19 @@
 #endif
 
 /* Some headers in /usr/include depend on the usermode endian conventions, while some kernel
- * header files depend on the kernel endian conventions.  #include all the former before fixing
- * up the endian indicators below; and #include all the latter after the fixup.
+ * header files depend on the kernel endian conventions.  Below we will #include all the former
+ * before fixing up the endian indicators, and #include all the latter after the fixup.
  */
 
 #define _ASM_GENERIC_BITOPS_HWEIGHT_H_	    /* inhibit hweight.h */
+#define __struct_tm_defined		    /* inhibit struct_tm.h */
 
 /* These headers come from /usr/include */
+
+#define ffs UMC_unused_ffs		    /* inhibit defining function ffs in string.h */
+#include <string.h>
+#undef ffs
+
 #include <sys/types.h>
 #include <inttypes.h>
 #include <stdint.h>
@@ -38,10 +44,6 @@
 #include <limits.h>
 #include <errno.h>
 #include <ctype.h>
-
-#define ffs UMC_unused_ffs	    /* evade defining function ffs in string.h */
-#include <string.h>
-#undef ffs
 
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -286,15 +288,15 @@ _ROUNDUP(uint64_t const v, uint64_t const q) { return (v + q - 1) / q * q; }
 #define UMC_kernelize(callret...)	_UMC_kernelize(callret)
 #define UMC_kernelize64(callret...)	_UMC_kernelize64(callret)
 #else
-#define UMC_kernelize(callret...)    ({ error_t ___ret = _UMC_kernelize(callret); \
-					if (___ret < 0) \
-					    sys_warning("%s returned %d", #callret, ___ret); \
-					___ret; \
+#define UMC_kernelize(callret...)    ({ error_t uk_ret = _UMC_kernelize(callret); \
+					if (uk_ret < 0) \
+					    sys_warning("%s returned %d", #callret, uk_ret); \
+					uk_ret; \
 				     })
-#define UMC_kernelize64(callret...)  ({ error_t ___ret = _UMC_kernelize64(callret); \
-					if (___ret < 0) \
-					    sys_warning("%s returned %d", #callret, ___ret); \
-					___ret; \
+#define UMC_kernelize64(callret...)  ({ error_t uk64_ret = _UMC_kernelize64(callret); \
+					if (uk64_ret < 0) \
+					    sys_warning("%s returned %d", #callret, uk64_ret); \
+					uk64_ret; \
 				     })
 #endif
 
@@ -337,8 +339,8 @@ static inline struct timespec
 ns_to_timespec(unsigned long ns)
 {
     struct timespec ret = { };
-    ret.tv_sec  = ns / 1000000000ul;
-    ret.tv_nsec = ns % 1000000000ul;
+    ret.tv_sec  = (long)(ns / 1000000000ul);
+    ret.tv_nsec = (long)(ns % 1000000000ul);
     return ret;
 }
 
@@ -380,7 +382,7 @@ ns_to_timeval(unsigned long ns)
 								* sys_time_hz() / HZ )
 
 #define jiffies_to_msecs(j) \
-	    ( (((unsigned long)(j) > JIFFY_MAX) ? JIFFY_MAX : (unsigned long)(j)) \
+	    (int)( (((unsigned long)(j) > JIFFY_MAX) ? JIFFY_MAX : (unsigned long)(j)) \
 								* 1000ul / HZ )
 
 #define jiffies_to_usecs(j) \
@@ -393,11 +395,49 @@ ns_to_timeval(unsigned long ns)
 #define time_before(x, y)		time_after((y), (x))
 #define time_before_eq(x, y)		time_after_eq((y), (x))
 
+/* Who thought it was a good idea to declare the kernel version of tm.tm_year as type long?? */
+/* Kernel version from include/linux/time.h */
+struct tm {
+        int tm_sec;
+        int tm_min;
+        int tm_hour;
+        int tm_mday;
+        int tm_mon;
+        long tm_year;
+        int tm_wday;
+        int tm_yday;
+};
+
+/* libc version from x86_64-linux-gnu/bits/types/struct_tm.h */
+struct tm_libc			/* ISO C `broken-down time' structure.  */
+{
+	int tm_sec;		/* Seconds.     [0-60] (1 leap second) */
+	int tm_min;		/* Minutes.     [0-59] */
+	int tm_hour;		/* Hours.       [0-23] */
+	int tm_mday;		/* Day.         [1-31] */
+	int tm_mon;		/* Month.       [0-11] */
+	int tm_year;		/* Year - 1900.  */
+	int tm_wday;		/* Day of week. [0-6] */
+	int tm_yday;		/* Days in year.[0-365] */
+	int tm_isdst;		/* DST.         [-1/0/1]*/
+	long int tm_gmtoff;	/* Seconds east of UTC.  */
+	const char *tm_zone;	/* Timezone abbreviation.  */
+};
+
 static inline void
 time_to_tm(time_t secs, int ofs, struct tm * result)
 {
     time_t total = secs + ofs;
-    localtime_r(&total, result);
+    struct tm_libc tm_libc;
+    localtime_r(&total, (void *)&tm_libc);  /* ugh */
+    result->tm_sec =	    tm_libc.tm_sec;
+    result->tm_min =	    tm_libc.tm_min;
+    result->tm_hour =	    tm_libc.tm_hour;
+    result->tm_mday =	    tm_libc.tm_mday;
+    result->tm_mon =	    tm_libc.tm_mon;
+    result->tm_year = (long)tm_libc.tm_year;
+    result->tm_wday =	    tm_libc.tm_wday;
+    result->tm_yday =	    tm_libc.tm_yday;
 }
 
 /*** Strings ***/
@@ -543,8 +583,8 @@ extern void si_meminfo(struct sysinfo *si);
 #define PAGE_SHIFT			12U	/* need not match real kernel */
 #endif
 
-#define PAGE_SIZE			(1UL<<PAGE_SHIFT)
-#define PAGE_MASK			(~(PAGE_SIZE-1))
+#define PAGE_SIZE			(1U<<PAGE_SHIFT)
+#define PAGE_MASK			(~((unsigned long)PAGE_SIZE - 1))
 
 #define PAGE_ALIGN(size)		ALIGN((size), PAGE_SIZE)
 
@@ -559,10 +599,8 @@ extern void si_meminfo(struct sysinfo *si);
 #define free_page(addr)			free_pages((addr), 0)
 #define free_pages(addr, order)		kfree((void *)addr)
 
-#ifdef VALGRIND
-#define ARENA_DISABLE 1
-#else
-#define ARENA_DISABLE 0
+#ifndef ARENA_DISABLE
+#define ARENA_DISABLE false
 #endif
 
 //XXX ADD mem_buf_allocator_set() to the sys_services API
@@ -673,7 +711,7 @@ mempool_destroy(mempool_t * mp)
 
 /* Create a mempool: pool_data passed to alloc/free functions */
 static inline mempool_t *
-mempool_create(unsigned int min_nr, void * (*alloc_fn)(gfp_t, void *),
+mempool_create(int min_nr, void * (*alloc_fn)(gfp_t, void *),
 		void (*free_fn)(void *, void *), void * pool_data)
 {
     assert(alloc_fn != NULL);
@@ -837,7 +875,7 @@ call_usermodehelper(const char * progpath, char * argv[], char * envp[], int wai
 #define ATOMIC_INIT(n)			((atomic_t){ .counter = (n) })
 
 					//XXX Figure out which of these barriers isn't needed
-#define atomic_get(ptr)			({ __barrier(); int32_t __ret = (ptr)->counter; __barrier(); __ret; })
+#define atomic_get(ptr)			({ __barrier(); int32_t ag_ret = (ptr)->counter; __barrier(); ag_ret; })
 #define atomic_set(ptr, val)		do { __barrier(); (ptr)->counter = (val); __barrier(); } while (0)
 
 /* Bitwise atomics return the OLD value */
@@ -965,7 +1003,7 @@ typedef struct rwlock {
 #define rwlock_init(rw)			(*(rw) = (rwlock_t)RW_LOCK_UNLOCKED(#rw))
 
 static inline void
-rwlock_assert_writer(rwlock_t * const rw)
+rwlock_assert_writer(rwlock_t * rw)
 {
 #ifdef UMC_LOCK_CHECKS
     verify_le(atomic_read(&rw->count), 0, "Writer not exclusive??");
@@ -975,7 +1013,7 @@ rwlock_assert_writer(rwlock_t * const rw)
 }
 
 static inline void
-rwlock_assert_readlocked(rwlock_t * const rw)
+rwlock_assert_readlocked(rwlock_t * rw)
 {
 #ifdef UMC_LOCK_CHECKS
     verify_lt(atomic_read(&rw->count), _RW_LOCK_WR_COUNT, "%s is not locked as expected", rw->name);
@@ -1018,7 +1056,7 @@ rwlock_take_try(rwlock_t * rw, uint32_t ntake)
 #define write_lock(rw)			while (!write_lock_try(rw)) _SPINWAITING()
 
 static inline void
-rwlock_drop(rwlock_t * const rw, uint32_t ndrop)
+rwlock_drop(rwlock_t * rw, uint32_t ndrop)
 {
     lock_trace("'%s' (%u) returns %u (%s) to spinlock %s at %p",
 	  sys_thread_name(sys_thread_current()), sys_thread_num(sys_thread_current()),
@@ -1072,7 +1110,7 @@ typedef struct spinlock {
 #define assert_spin_locked(lock)	spin_lock_assert_holding(lock)
 
 static inline void
-spin_lock_assert_holding(spinlock_t * const lock)
+spin_lock_assert_holding(spinlock_t * lock)
 {
 #ifdef UMC_LOCK_CHECKS
     assert(lock);
@@ -1129,7 +1167,7 @@ _spin_lock(spinlock_t * lock, sstring_t whence)
 #define spin_lock_nested(lock, subclass)    UMC_STUB(spin_lock_nested) //XXXXXX
 
 static inline void
-spin_unlock(spinlock_t * const lock)
+spin_unlock(spinlock_t * lock)
 {
     lock_trace("'%s' (%u) drops spinlock %s at %p",
 	  sys_thread_name(sys_thread_current()), sys_thread_num(sys_thread_current()),
@@ -1252,7 +1290,7 @@ mutex_unlock(mutex_t * m)
 
 /* Use of this function is inherently racy */
 static inline bool
-mutex_is_locked(mutex_t * const m)
+mutex_is_locked(mutex_t * m)
 {
     if (unlikely(!mutex_trylock(m))) {
 	return true;	/* we couldn't get the mutex, therefore it is locked */
@@ -1343,14 +1381,14 @@ struct rcu_head {
 					} while (0)
 
 /* Does func(head) under RCU write lock */
+//XXXXX Give this to a worker thread to do
 #define call_rcu(head, func)		do { _rcu_write_lock(); \
 					     (func)(head); \
 					     _rcu_write_unlock(); \
 					} while (0)
 
-//XXXXX I think this isn't really right, but I could be wrong about that
+//XXX check this
 #define synchronize_rcu()		do { _rcu_write_lock(); \
-					     sys_notice("synchronize_RCU"); \
 					     _rcu_write_unlock(); \
 					} while (0)
 
@@ -1728,7 +1766,7 @@ struct task_struct {
     /* kernel code compatibility */
     cpumask_t		    cpus_allowed;
     bool	   volatile should_stop;    /* kthread shutdown signalling */
-    char		    comm[1+TASK_COMM_LEN];  /* thread name */
+    char		    comm[TASK_COMM_LEN];  /* thread name */
     pid_t		    pid;	    /* tid, actually */
     int			    flags;	    /* ignored */
     void		  * io_context;	    /* unused */
@@ -1772,8 +1810,13 @@ _force_sig(unsigned long signo, struct task_struct * task, sstring_t caller_id)
 static inline void
 _flush_signals(struct task_struct * task, sstring_t caller_id)
 {
-    sys_notice("%s: task %s (%d) FLUSH SIGNALS (0x%lx) to task %s (%d)", caller_id,
+    if (current == task)
+	sys_notice("%s: task %s (%d) FLUSH SIGNALS (0x%lx)", caller_id,
+	    current->comm, current->pid, task->signals_pending);
+    else
+	sys_notice("%s: task %s (%d) FLUSH SIGNALS (0x%lx) of task %s (%d)", caller_id,
 	    current->comm, current->pid, task->signals_pending, task->comm, task->pid);
+
     task->signals_pending = 0;
 }
 
@@ -1849,23 +1892,23 @@ _flush_signals(struct task_struct * task, sstring_t caller_id)
 
 /* Return ticks remaining */
 #define schedule_timeout(jdelta) ({ \
-	error_t ret = jdelta; \
+	error_t st_ret = jdelta; \
 	if (likely(current->state != TASK_RUNNING && current->waitq)) { \
 		int jremain = jdelta < JIFFY_MAX ? jdelta : JIFFY_MAX; \
 					/*XXX bug: overflow in add */ \
 		sys_time_t t_end = sys_time_now() + jiffies_to_sys_time(jremain); \
 		spin_lock(&current->waitq->lock); \
-		ret = schedule_timeout_locked(t_end, &current->waitq->lock); \
+		st_ret = schedule_timeout_locked(t_end, &current->waitq->lock); \
 		spin_unlock(&current->waitq->lock); \
-		if (ret == -ETIMEDOUT) { \
-			ret = 0; \
+		if (st_ret == -ETIMEDOUT) { \
+			st_ret = 0; \
 		} else { \
-			ret = jiffies_of_sys_time(t_end - sys_time_now()); \
-			if (ret <= 0) \
-				ret = 1; \
+			st_ret = jiffies_of_sys_time(t_end - sys_time_now()); \
+			if (st_ret <= 0) \
+				st_ret = 1; \
 		} \
 	} \
-	ret; \
+	st_ret; \
 })
 
 #define prepare_to_wait(WQ, W, TSTATE) \
@@ -1970,11 +2013,11 @@ _flush_signals(struct task_struct * task, sstring_t caller_id)
 		if (unlikely(!(WAITQ).initialized)) \
 		    _init_waitqueue_head(&(WAITQ)); \
 		spin_lock(&(WAITQ).lock); \
-		error_t const _ret = \
+		error_t const _wet_ret = \
 		    _wait_event_locked_timeout((WAITQ), (COND), \
 						&(WAITQ).lock, NULL, (t_end)); \
 		spin_unlock(&(WAITQ).lock); \
-		_ret; \
+		_wet_ret; \
 	    })
 
 /* Non-exclusive wakeup with NO timeout */
@@ -1983,7 +2026,7 @@ _flush_signals(struct task_struct * task, sstring_t caller_id)
 /* Returns ticks remaining if the condition was met */
 #define wait_event_timeout(WAITQ, COND, jdelta) \
 	    ({ \
-		int __ret = 1; \
+		unsigned long wet_ret = 1; \
 		sys_time_t next_check; \
 		sys_time_t now = sys_time_now(); \
 		sys_time_t t_end = now + jiffies_to_sys_time(jdelta); \
@@ -1991,26 +2034,26 @@ _flush_signals(struct task_struct * task, sstring_t caller_id)
 		    t_end = SYS_TIME_MAX;	/* overflow */ \
 		if (!(COND)) do { \
 		    if (kthread_should_stop()) { \
-			__ret = 0; /* pretend like we timed out */ \
+			wet_ret = 0; /* pretend like we timed out */ \
 			break; \
 		    } \
 		    now = sys_time_now(); \
 		    if (time_after_eq(now, t_end)) { \
-			__ret = 0; \
+			wet_ret = 0; \
 			break; \
 		    } \
 		    if (t_end - now < WAITQ_CHECK_INTERVAL) next_check = t_end; \
 		    else next_check = now + WAITQ_CHECK_INTERVAL; \
 		} while (!_wait_event_timeout((WAITQ), (COND), next_check)); \
 		now = sys_time_now(); \
-		__ret <= 0 ? __ret : time_after_eq(now, t_end) ? 0 : jiffies_of_sys_time(t_end - now); \
+		wet_ret <= 0 ? wet_ret : time_after_eq(now, t_end) ? 0 : jiffies_of_sys_time(t_end - now); \
 	    })
 
 /* Non-exclusive wakeup WITH timeout, and periodic checks for kthread_should_stop */
 /* Returns ticks remaining if the condition was met, 0 if timeout elapsed, or -ERESTARTSYS */
 #define wait_event_interruptible_timeout(WAITQ, COND, jdelta) \
 	    ({ \
-		int __ret = 1; \
+		unsigned long weit_ret = 1; \
 		sys_time_t next_check; \
 		sys_time_t now = sys_time_now(); \
 		sys_time_t t_end = now + jiffies_to_sys_time(jdelta); \
@@ -2018,23 +2061,23 @@ _flush_signals(struct task_struct * task, sstring_t caller_id)
 		    t_end = SYS_TIME_MAX;	/* overflow */ \
 		if (!(COND)) do { \
 		    if (kthread_should_stop()) { \
-			__ret = -ERESTARTSYS; \
+			weit_ret = -ERESTARTSYS; \
 			break; \
 		    } \
 		    if (signal_pending(current)) { \
-			__ret = -ERESTARTSYS; \
+			weit_ret = -ERESTARTSYS; \
 			break; \
 		    } \
 		    now = sys_time_now(); \
 		    if (time_after_eq(now, t_end)) { \
-			__ret = 0; \
+			weit_ret = 0; \
 			break; \
 		    } \
 		    if (t_end - now < WAITQ_CHECK_INTERVAL) next_check = t_end; \
 		    else next_check = now + WAITQ_CHECK_INTERVAL; \
 		} while (!_wait_event_timeout((WAITQ), (COND), next_check)); \
 		now = sys_time_now(); \
-		__ret <= 0 ? __ret : time_after_eq(now, t_end) ? 0 : jiffies_of_sys_time(t_end - now); \
+		weit_ret <= 0 ? weit_ret : time_after_eq(now, t_end) ? 0 : jiffies_of_sys_time(t_end - now); \
 	    })
 
 /* Non-exclusive wakeup with NO timeout, with periodic checks for kthread_should_stop */
@@ -2042,19 +2085,19 @@ _flush_signals(struct task_struct * task, sstring_t caller_id)
 #define wait_event_interruptible(WAITQ, COND) \
 	    ({ \
 		sys_time_t next_check; \
-		error_t __ret = E_OK; \
+		error_t wei_ret = E_OK; \
 		if (!(COND)) do { \
 		    if (kthread_should_stop()) { \
-			__ret = -ERESTARTSYS; \
+			wei_ret = -ERESTARTSYS; \
 			break; \
 		    } \
 		    if (signal_pending(current)) { \
-			__ret = -ERESTARTSYS; \
+			wei_ret = -ERESTARTSYS; \
 			break; \
 		    } \
 		    next_check = sys_time_now() + WAITQ_CHECK_INTERVAL; \
 		} while (!_wait_event_timeout((WAITQ), (COND), next_check)); \
-		__ret; \
+		wei_ret; \
 	    })
 
 /* First change the condition being waited on, then call wake_up*() --
@@ -2407,7 +2450,7 @@ _irqthread_run(string_t name)
 #define msleep(ms)			usleep((ms) * 1000)
 #define jsleep(jiffies)			msleep(jiffies_to_msecs(jiffies))
 
-extern void UMC_alarm_handler(void * const v_timer, uint64_t const now, error_t);
+extern void UMC_alarm_handler(void * v_timer, uint64_t const now, error_t);
 
 struct timer_list {
     void		  (*function)(uintptr_t);   /* kernel-code handler */
@@ -2721,7 +2764,7 @@ _alloc_pages(gfp_t gfp, unsigned int order, sstring_t caller_id)
 #define KM_IRQ1				IGNORED
 
 /* Return binary order of magnitude of val, where PAGE_SIZE is (the high-end of) order zero */
-static inline uint32_t
+static inline int
 get_order(unsigned long val)
 {
     unsigned long scaled_val = (val - 1) / PAGE_SIZE;
@@ -2825,7 +2868,7 @@ struct queue_limits {
 
 struct request_queue {
     struct list_head			queue_head;
-    spinlock_t			      *	queue_lock; /* yes, a pointer */
+    spinlock_t			      *	queue_lock; /* yes, a pointer (2.6.32) */
     int				      (*make_request_fn)(struct request_queue *, struct bio *);
     void			      *	queuedata;
     unsigned int			in_flight[2];
@@ -3197,7 +3240,8 @@ bdget(dev_t devt)
 
     bdev->bd_inode = inode;
 
-    assert_eq(BDEV_I(inode), bdev);
+    struct block_device * bdev_check = BDEV_I(inode);
+    assert_eq(bdev_check, bdev);
     return bdev;
 }
 
@@ -3245,7 +3289,7 @@ struct hd_struct {
 struct gendisk {
     struct list_head			disk_list;
     struct request_queue	      * queue;
-    int					major;
+    unsigned int			major;
     int					first_minor;
     char				disk_name[32];
     void			      * private_data;
@@ -3763,7 +3807,7 @@ tcp_sk(struct sock *sk)
 
 struct socket_ops {
     ssize_t (*sendpage)  (struct socket *, struct page *, int, size_t, int);
-    int     (*setsockopt)(struct socket *, int, int, void *, int);
+    int     (*setsockopt)(struct socket *, int, int, void *, socklen_t);
     int     (*getname)   (struct socket *, struct sockaddr *, socklen_t *addr_len, int peer);
     int     (*bind)	 (struct socket *, struct sockaddr *, socklen_t addr_len);
     int     (*connect)   (struct socket *, struct sockaddr *, socklen_t addr_len, int flags);
@@ -3808,7 +3852,7 @@ struct socket {
 extern ssize_t sock_no_sendpage(struct socket *sock, struct page *page, int offset,
 				size_t size, int flags);
 extern error_t UMC_setsockopt(struct socket * sock, int level, int optname,
-				void *optval, int optlen);
+				void *optval, socklen_t optlen);
 extern error_t UMC_sock_connect(struct socket * sock, struct sockaddr * addr,
 				socklen_t addrlen, int flags);
 extern error_t UMC_sock_bind(struct socket * sock, struct sockaddr *addr, socklen_t addrlen);
@@ -3951,12 +3995,14 @@ sock_create_kern(int family, int type, int protocol, struct socket **newsock)
 {
     int fd = UMC_socket(family, type, protocol);
     if (unlikely(fd < 0)) {
+	*newsock = NULL;
 	return fd;	/* -errno */
     }
 
     struct file * file = _fget(fd);
     if (!file) {
 	close(fd);
+	*newsock = NULL;
 	return -ENOMEM;
     }
 
@@ -4079,7 +4125,7 @@ seq_puts(struct seq_file * seq, string_t s)
 }
 
 static inline error_t
-seq_open(struct file * const file, struct seq_operations const * const ops)
+seq_open(struct file * file, struct seq_operations const * ops)
 {
     struct seq_file * seq = record_alloc(seq);
     assert_eq(file->private_data, NULL);
@@ -4089,7 +4135,7 @@ seq_open(struct file * const file, struct seq_operations const * const ops)
 }
 
 static inline error_t
-seq_release(struct inode * const unused, struct file * const file)
+seq_release(struct inode * unused, struct file * file)
 {
     struct seq_file * seq_file = file->private_data;
     file->private_data = NULL;
@@ -4098,7 +4144,7 @@ seq_release(struct inode * const unused, struct file * const file)
 }
 
 static inline error_t
-single_open(struct file * const file, int (*show)(struct seq_file *, void *), void * data)
+single_open(struct file * file, int (*show)(struct seq_file *, void *), void * data)
 {
     struct seq_operations *op = record_alloc(op);
     op->show = show;
@@ -4110,7 +4156,7 @@ single_open(struct file * const file, int (*show)(struct seq_file *, void *), vo
 }
 
 static inline error_t
-single_release(struct inode * const inode, struct file * const file)
+single_release(struct inode * inode, struct file * file)
 {
     const struct seq_operations *op = ((struct seq_file *)file->private_data)->op;
     int rc = seq_release(inode, file);
@@ -4141,7 +4187,7 @@ seq_list_next(void *v, struct list_head *head, loff_t *ppos)
 
 /* Use the seq_ops to format and return some state */
 static inline void
-seq_fmt(struct seq_file * const seq)
+seq_fmt(struct seq_file * seq)
 {
     if (!seq->op->show) return;
 
@@ -4165,7 +4211,7 @@ seq_fmt(struct seq_file * const seq)
 }
 
 static inline ssize_t
-seq_read(struct file * const file, void * buf, size_t size, loff_t * lofsp)
+seq_read(struct file * file, void * buf, size_t size, loff_t * lofsp)
 {
     struct seq_file * seq = file->private_data;
     assert_ge(*lofsp, 0);
@@ -4189,7 +4235,7 @@ seq_read(struct file * const file, void * buf, size_t size, loff_t * lofsp)
 
     if (seq->reply) vfree(seq->reply);
 
-    return reply_size;
+    return (ssize_t)reply_size;
 }
 
 /* /proc and/or /sys simulated by mapping our proc_dir_entry tree to the FUSE filesystem API */
@@ -4361,6 +4407,29 @@ sg_free_table(struct sg_table *table)
 
 /********** Misc **********/
 
+/*** Sleepable rw_semaphore ***/
+
+struct rw_semaphore {
+    rwlock_t				rwlock;
+    wait_queue_head_t			waitq;
+};
+
+#define RW_SEM_UNLOCKED(rwname)		{ .rwlock = RW_LOCK_UNLOCKED(rwname), \
+					  .waitq =  WAIT_QUEUE_HEAD_INIT(rwname) }
+
+#define DECLARE_RWSEM(rw_sem)		struct rw_semaphore rw_sem = RW_SEM_UNLOCKED(rw_sem)
+
+#define down_read_trylock(rw_sem)	read_lock_try(&(rw_sem)->rwlock)
+#define down_write_trylock(rw_sem)	write_lock_try(&(rw_sem)->rwlock)
+
+#define down_read(rw_sem)		wait_event((rw_sem)->waitq, down_read_trylock(rw_sem))
+#define down_write(rw_sem)		wait_event((rw_sem)->waitq, down_write_trylock(rw_sem))
+
+#define up_read(rw_sem)			({  read_unlock(&(rw_sem)->rwlock); wake_up_one(&(rw_sem)->waitq); })
+#define up_write(rw_sem)		({ write_unlock(&(rw_sem)->rwlock); wake_up_all(&(rw_sem)->waitq); })
+
+#define MAX_SCHEDULE_TIMEOUT		JIFFY_MAX
+
 /*** Unaligned access ***/
 
 #define _LINUX_UNALIGNED_ACCESS_OK_H	    /* avoid access_ok.h */
@@ -4388,7 +4457,6 @@ extern void genl_rcv(struct sk_buff *skb);
 
 #define UMC_NETLINK_PORT 1234u	/* UDP port for simulated netlink */
 
-extern int netlink_rcv_skb(struct sk_buff *skb, int (*cb)(struct sk_buff *, struct nlmsghdr *));
 extern error_t netlink_xmit(struct sock *sk, struct sk_buff *skb, u32 pid, u32 group, int nonblock);
 
 #define netlink_unicast(sk, skb, pid, nonblock) \
@@ -4424,42 +4492,14 @@ extern struct net init_net;
 struct genl_family;
 #include <net/genetlink.h>
 
+/*** Hashing and Crypto ***/
+
 #if 0	    //XXX crc32c
 #include <linux/crc32c.h>		// lib/libcrc32c.c
 #else
 extern uint32_t crc32c_uniq;		//XXXX hack makes these unique -- not good for matching
 #define crc32c(x, y, z)			(++crc32c_uniq)	//XXXX
 #endif
-
-/* There are here mainly to keep them compiling */
-#include <linux/idr.h>
-#include <linux/rbtree.h>
-#include <linux/ioctl.h>
-#include <linux/swab.h>
-
-/*** Sleepable rw_semaphore ***/
-struct rw_semaphore {
-    rwlock_t				rwlock;
-    wait_queue_head_t			waitq;
-};
-
-#define RW_SEM_UNLOCKED(rwname)		{ .rwlock = RW_LOCK_UNLOCKED(rwname), \
-					  .waitq =  WAIT_QUEUE_HEAD_INIT(rwname) }
-
-#define DECLARE_RWSEM(rw_sem)		struct rw_semaphore rw_sem = RW_SEM_UNLOCKED(rw_sem)
-
-#define down_read_trylock(rw_sem)	read_lock_try(&(rw_sem)->rwlock)
-#define down_write_trylock(rw_sem)	write_lock_try(&(rw_sem)->rwlock)
-
-#define down_read(rw_sem)		wait_event((rw_sem)->waitq, down_read_trylock(rw_sem))
-#define down_write(rw_sem)		wait_event((rw_sem)->waitq, down_write_trylock(rw_sem))
-
-#define up_read(rw_sem)			({  read_unlock(&(rw_sem)->rwlock); wake_up_one(&(rw_sem)->waitq); })
-#define up_write(rw_sem)		({ write_unlock(&(rw_sem)->rwlock); wake_up_all(&(rw_sem)->waitq); })
-
-#define MAX_SCHEDULE_TIMEOUT		JIFFY_MAX
-
-/*** Hashing and Crypto ***/
 
 /* XXXX crypto_hash calls not yet translated to usermode */
 struct hash_desc {
@@ -4500,6 +4540,14 @@ struct ahash_request { };
 #define crypto_free_ahash(h)				UMC_STUB(crypto_free_ahash)
 #define crypto_free_shash(h)				UMC_STUB(crypto_free_shash)
 #define crypto_shash_descsize(h)			UMC_STUB(crypto_shash_descsize)
+
+/* There are here mainly to keep them compiling */
+#include <linux/idr.h>
+#include <linux/rbtree.h>
+#include <linux/ioctl.h>
+#include <linux/swab.h>
+
+//#undef pr_fmt	//XXX
 
 ////////////////////////////////////////////////////////////////////////////////
 ////// Stub out some definitions unused in usermode builds		  //////

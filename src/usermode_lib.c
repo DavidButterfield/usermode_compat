@@ -126,6 +126,8 @@ UMC_delayed_work_process(uintptr_t u_dwork)
 
 /******************************************************************************/
 
+#define trace_thread_verbose(fmtargs...)    //  sys_notice(fmtargs)
+
 /* The running kthread exits.
  *
  * It looks like each kthread is designed EITHER to exit ON REQUEST using kthread_stop and
@@ -150,7 +152,7 @@ UMC_kthread_fn(void * v_task)
     struct task_struct * task = v_task;
     UMC_current_set(task);
 
-    pr_debug("Thread %s (%p, %u) starts task->SYS %s (%p) task %s (%p)\n",
+    trace_thread_verbose("Thread %s (%p, %u) starts task->SYS %s (%p) task %s (%p)\n",
 	     sys_thread_name(sys_thread), sys_thread, gettid(),
 	     sys_thread_name(task->SYS), task->SYS,
 	     task->comm, task);
@@ -436,7 +438,7 @@ UMC_socketpair(int domain, int type, int protocol, int sv[2])
 }
 
 error_t
-UMC_setsockopt(struct socket * sock, int level, int optname, void *optval, int optlen)
+UMC_setsockopt(struct socket * sock, int level, int optname, void *optval, socklen_t optlen)
 {
     error_t ret = UMC_kernelize(setsockopt(sock->sk->fd, level, optname, optval, optlen));
 #ifdef TRACE_socket
@@ -675,7 +677,7 @@ restart:
 	}
 #endif
 	/* Advance the msg by the number of bytes we received into it */
-	size_t skipbytes = rc;
+	size_t skipbytes = (size_t)rc;
 	while (skipbytes && skipbytes >= msg->msg_iov->iov_len) {
 	    // msg->msg_iov->iov_base += msg->msg_iov->iov_len; //XXX needed?
 	    skipbytes -= msg->msg_iov->iov_len;
@@ -1001,7 +1003,7 @@ static void
 establish_netlink(void)
 {
     if (init_net.genl_sock) {
-	sys_warning("netlink listener already established!");
+	sys_warning("netlink server already established!");
 	return;
     }
 
@@ -1025,7 +1027,7 @@ establish_netlink(void)
 	close(fd);
 
     } else {
-	sys_notice("starting netlink listener");
+	sys_notice("starting netlink server");
 
 	struct file * file = _fget(fd);
 	if (!file) {
@@ -1205,7 +1207,7 @@ UMC_sched_setscheduler(struct task_struct * task, int policy, struct sched_param
 //XXX He probably wants the realtime scheduler, but not happening today
 //  return UMC_kernelize(sched_setscheduler(task->pid, policy, param));
     // nice him up instead
-    setpriority(PRIO_PROCESS, task->pid, param->sched_priority > 0 ? -20 : 0);
+    setpriority(PRIO_PROCESS, (id_t)task->pid, param->sched_priority > 0 ? -20 : 0);
     return E_OK;
 }
 

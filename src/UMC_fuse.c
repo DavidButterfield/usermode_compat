@@ -121,7 +121,9 @@ pde_node_fmt(struct proc_dir_entry * pde, char * buf, size_t size, off_t * lofsp
     file->inode = &pi->vfs_inode;
     init_inode(file->inode, I_TYPE_PROC, pde->mode, 0, 0);
     file->inode->UMC_fd = -1;
-    assert_eq(PROC_I(file->inode), pi);
+
+    struct proc_inode * pi_check = PROC_I(file->inode);
+    assert_eq(pi_check, pi);
     pi->pde = pde;
 
     err = pde->proc_fops->open(file->inode, file);
@@ -229,7 +231,7 @@ pde_getattr(struct proc_dir_entry * pde_root, sstring_t path, struct stat * st)
     assert(S_ISREG(pde->mode) || S_ISDIR(pde->mode));
 
     st->st_mode = pde->mode;
-    st->st_nlink = 1 + S_ISDIR(pde->mode) + pde_node_nchild(pde);
+    st->st_nlink = 1u + (unsigned int)S_ISDIR(pde->mode) + pde_node_nchild(pde);
     st->st_size = 4096;	//XXXX	What should go here?
     st->st_uid = 0;		    /* root */
     st->st_atime = pde->atime;
@@ -313,7 +315,8 @@ pde_write(struct proc_dir_entry * pde_root, char const * path,
     file->inode = &pi->vfs_inode;
     init_inode(file->inode, I_TYPE_PROC, 0666, 0, 0);
     file->inode->UMC_fd = -1;
-    assert_eq(PROC_I(file->inode), pi);
+    struct proc_inode * pi_check = PROC_I(file->inode);
+    assert_eq(pi_check, pi);
     pi->pde = pde;
 
     err = pde->proc_fops->open(file->inode, file);
@@ -618,7 +621,7 @@ module_param_write(struct file * file, char const * buf, size_t writesize, loff_
     pde_node_check(pde);
     *(int *)pde->data = v;
     
-    return writesize;
+    return (ssize_t)writesize;
 }
 
 static ssize_t
