@@ -1,6 +1,6 @@
 # usermode_compat/src/Makefile
 # Makefile for usermode compatibility for Linux kernel source code
-# Imports optional SYS_SERVICE_INCL, CFLAGS, REF_KERNEL
+# Imports optional SYS_SERVICE_INCL, CFLAGS, MY_CFLAGS, EXTRA_CFLAGS, REF_KERNEL
 
 ifndef REF_KERNEL
 ### Place to get real kernel header files (preferably of the level being emulated)
@@ -8,23 +8,24 @@ ifndef REF_KERNEL
 REF_KERNEL := $(shell /bin/pwd)/../../linux-2.6.32.27
 endif
 
-# MY_CFLAGS += -DDEBUG
+MY_CFLAGS += -DDEBUG
 # MY_CFLAGS += -fsanitize=undefined
 # MY_CFLAGS += -DNDEBUG
+
 # MY_CFLAGS += -DTRACE_TRACE
 # MY_CFLAGS += -DTRACE_VERBOSE
 
 # MY_CFLAGS += -O0
-# MY_CFLAGS += -Og
+MY_CFLAGS += -Og
 # MY_CFLAGS += -O1
 # MY_CFLAGS += -O2
 # MY_CFLAGS += -O3
 
 # disable most of the memory checks remaining when !DEBUG
-# MY_CFLAGS += -DOPTIMIZED
+MY_CFLAGS += -DOPTIMIZED
 
 # VALGRIND enables memory initialization; NVALGRIND disables all valgrind checks
-# MY_CFLAGS += -DVALGRIND
+# MY_CFLAGS += -DVALGRIND -DARENA_DISABLE=1
 # MY_CFLAGS += -DNVALGRIND
 
 ifndef SYS_SERVICE_INCL
@@ -35,46 +36,57 @@ endif
 MY_CFLAGS += -I$(SYS_SERVICE_INCL)
 MTELIB_H := $(SYS_SERVICE_INCL)/mtelib.h
 
-########################  Enable most compiler warnings  #######################
+#######################  Enable most compiler warnings  #######################
 
+# Warnings enabled by a real kernel build
 WFLAGS_WARN += -Wall
-WFLAGS_WARN += -Wextra
-WFLAGS_WARN += -Wundef
-WFLAGS_WARN += -Winit-self
+WFLAGS_WARN += -Wmissing-prototypes
 WFLAGS_WARN += -Wstrict-prototypes
-WFLAGS_WARN += -Wlogical-op
+WFLAGS_WARN += -Wundef
+
+# Warnings passed by MTE and by UMC and its included reference kernel files
+WFLAGS_WARN += -Wextra
 WFLAGS_WARN += -Wjump-misses-init
+WFLAGS_WARN += -Wlogical-op
 WFLAGS_WARN += -Wcast-align
 WFLAGS_WARN += -Wold-style-definition 
-WFLAGS_WARN += -Wredundant-decls
-WFLAGS_WARN += -Wbad-function-cast
-WFLAGS_WARN += -Wmissing-declarations
-WFLAGS_WARN += -Wmissing-prototypes
-WFLAGS_WARN += -Wnested-externs
 WFLAGS_WARN += -Wmissing-include-dirs
-WFLAGS_WARN += -Wunsafe-loop-optimizations
-WFLAGS_WARN += -Wformat=2
-WFLAGS_WARN += -Wshadow
-WFLAGS_WARN += -Wswitch-default
-WFLAGS_WARN += -Wswitch-enum
 WFLAGS_WARN += -Wfloat-conversion
-WFLAGS_WARN += -fstrict-aliasing -Wstrict-aliasing
-# WFLAGS_WARN += -Wcast-qual		# 2 in kernel genetlink.h
-# WFLAGS_WARN += -Wwrite-strings
+WFLAGS_WARN += -Wmissing-declarations
+WFLAGS_WARN += -Wnested-externs
+WFLAGS_WARN += -Wunsafe-loop-optimizations
 
-## too noisy
-# WFLAGS_WARN += -Wpointer-arith
+WFLAGS_WARN += -Winit-self
+WFLAGS_WARN += -Wswitch-enum
+WFLAGS_WARN += -Wredundant-decls
+WFLAGS_WARN += -Wformat=2
+
+# This only warns if -fstrict-aliasing is enabled (e.g. by -O2), in which case the warning is important
+WFLAGS_WARN += -Wstrict-aliasing
+
+## Some of each of these in MTE code
 # WFLAGS_WARN += -Wconversion
 # WFLAGS_WARN += -Wsign-conversion
+# WFLAGS_WARN += -Wpointer-arith
 
-WFLAGS_INHIBIT += -Wno-sign-compare	# some kernel code
+## Some of each of these in UMC code
+# WFLAGS_WARN += -Wwrite-strings
 
-# silly
+### Some of each of these in code included from reference kernel 2.6.32
+# WFLAGS_WARN += -Wswitch-default			# 1 in lib/bitmap.c
+# WFLAGS_WARN += -Wcast-qual				# several in reference kernel files
+WFLAGS_WARN += -Wbad-function-cast			# 1 in linux/kernel.h when compiling SCST/DRBD
+WFLAGS_WARN += -Wshadow					# kernel.h, bitops.h when compiling SCST/DRBD
+WFLAGS_INHIBIT += -Wno-sign-compare			# 3 in net/netlink.h, 1 in linux/skbuff.h
+WFLAGS_INHIBIT += -Wno-implicit-fallthrough		# 1 in lib/nlattr.c
+
+### silly
 WFLAGS_INHIBIT += -Wno-unused-parameter
 
 MY_CFLAGS += $(WFLAGS_WARN) $(WFLAGS_INHIBIT)
 
-################################################################################
+###############################################################################
+
 SHELL=/bin/bash
 
 MY_CFLAGS += -g -ggdb -fno-omit-frame-pointer -D_GNU_SOURCE -fPIC -I. -isystem ./arch/x86/include -isystem include
@@ -82,26 +94,21 @@ MY_CFLAGS += -g -ggdb -fno-omit-frame-pointer -D_GNU_SOURCE -fPIC -I. -isystem .
 SRCS_D = usermode_lib.c UMC_fuse.c
 OBJS_D = $(SRCS_D:.c=.o)
 
-all:	check_include check_MTE
+all:	check_kcopy check_MTE
 	$(MAKE) cscope
 	$(MAKE) .depend
 	$(MAKE) $(OBJS_D)
 
-check_include:
+check_kcopy:
 	@if [[ ! -d include ]] ; then $(MAKE) kcopy; fi
 
-ifndef MTELIB_H
 check_MTE:
-	@if [[ ! -f /usr/include/mtelib.h ]] ; then $(MAKE) include; fi
-else
-check_MTE:
-	@if [[ ! -f /usr/include/mtelib.h && ! -f $(MTELIB_H) ]] ; then $(MAKE) install; fi
-endif
+	@if [[ ! -f /usr/include/mtelib.h && ! -f $(MTELIB_H) ]] ; then $(MAKE) need_MTE; fi
 
-install:
-	@echo "***** Manually copy MTE header files into /usr/include or set Makefile SYS_SERVICE_INCL to point at MTE/trunk/include *****" ; exit 1
+need_MTE:
+	@echo "***** Install MTE header files into /usr/include or set Makefile SYS_SERVICE_INCL to point at MTE/include *****"
 
-%.o: %.c Makefile | check_include check_MTE
+%.o: %.c check_kcopy check_MTE
 	$(CC) -c -o $@ $(CFLAGS) $(MY_CFLAGS) $(EXTRA_CFLAGS) $<
 
 ifeq (.depend,$(wildcard .depend))
@@ -123,7 +130,7 @@ cscope:
 	@cscope -b -c -R
 	@ctags        -R
 
-.PHONY:	all kcopy _lib _include check_MTE check_include cscope
+.PHONY:	all check_kcopy check_MTE need_MTE clean extraclean cscope
 
 #########################################################################
 
@@ -132,9 +139,11 @@ cscope:
 # The empty tree provides non-failing, but empty, targets for #include directives.
 # Usermode build uses the actual kernel headers copied below.
 
+.PHONY:	kcopy _klib _kinclude
+
 DIR := $(shell /bin/pwd)
 
-kcopy:	_include _klib
+kcopy:	_kinclude _klib
 	@# These have been modified from the 2.6.32 reference kernel
 	@ cp kincl_mod/netlink.h    include/net/
 	@ cp kincl_mod/kernel.h	    include/linux/
@@ -156,9 +165,9 @@ _klib:
 # The ones that are commented out will require more work than simply uncommenting them!
 # They have never been tried nor had their depedencies determined
 
-_include:
+_kinclude:
 	@# Get some .h files from the reference kernel
-	@echo Copy selected kernel header files for inclusion by apps building for usermode
+	@echo Copy selected kernel header files from $(REF_KERNEL) for inclusion by apps building for usermode
 	@(cd $(REF_KERNEL)/arch; for d in `find x86   -type d`   ; do mkdir -p  $(DIR)/arch/$$d ; done)
 	@(cd $(REF_KERNEL)/arch; for f in `find x86 ! -type d,l` ; do touch     $(DIR)/arch/$$f ; done)
 	@(cd $(REF_KERNEL)/arch; for l in `find x86   -type l`   ; do cp -d $$l $(DIR)/arch/$$l ; done)
