@@ -18,10 +18,6 @@ extern _PER_THREAD char sys_pthread_name[16];
 _PER_THREAD struct task_struct * current;   /* current task (thread) structure */
 static struct task_struct UMC_init_current_space;
 
-struct _irqthread * UMC_irqthread;	/* delivers "softirq" callbacks */
-
-struct workqueue_struct * UMC_workq;	/* general-purpose work queue */
-
 LIST_HEAD(UMC_disk_list);		/* list of struct gendisk */
 DEFINE_SPINLOCK(UMC_disk_list_lock);
 
@@ -32,8 +28,6 @@ static __aligned(PAGE_SIZE) uint8_t empty_zero_page[PAGE_SIZE];
 struct page zero_page;
 
 unsigned int nr_cpu_ids;		/* number of CPUs at runtime */
-
-DEFINE_RWLOCK(UMC_rcu_lock);		/* rwlock substitute for RCU locking */
 
 struct timezone sys_tz;
 
@@ -97,6 +91,61 @@ strict_strtoll(const char * str, unsigned int base, long long * var)
 
 /******************************************************************************/
 
+DEFINE_RWLOCK(UMC_rcu_lock);		/* rwlock substitute for RCU locking */
+DEFINE_SPINLOCK(UMC_rcu_cb_list_lock);	/* callback list lock */
+struct rcu_head	* UMC_rcu_cb_list;	/* callback list */
+DECLARE_WAIT_QUEUE_HEAD(UMC_rcu_cb_wake);   /* RCU callback thread sleep/wake */
+struct task_struct * UMC_rcu_cb_thr;
+
+/* Backend for call_rcu(), done on RCU worker thread */
+static inline void
+UMC_rcu_cb(struct rcu_head * this)
+{
+    unsigned long offset = (unsigned long)this->func;
+    if (offset < 4096) {
+	/* Hack for the simple case of freeing a structure */
+	kfree((void *)this - offset);
+    } else {
+	/* Call the function specified in call_rcu() */
+	this->func(this);
+    }
+}
+
+/* RCU callback delivery thread running on-thread */
+static error_t
+UMC_rcu_cb_fn(void * unused)
+{
+    while (!kthread_should_stop()) {
+	spin_lock(&UMC_rcu_cb_list_lock);
+
+	/* Wait for some RCU callbacks to appear on our work queue */
+	if (!UMC_rcu_cb_list)
+	    wait_event_locked(UMC_rcu_cb_wake,
+			      UMC_rcu_cb_list != NULL || kthread_should_stop(),
+			      lock, UMC_rcu_cb_list_lock);
+
+	/* Grab all the RCU callbacks from the queue */
+	struct rcu_head * worklist = UMC_rcu_cb_list;
+	UMC_rcu_cb_list = NULL;
+
+	spin_unlock(&UMC_rcu_cb_list_lock);
+
+	/* Wait for all the readers to go away */
+	synchronize_rcu();
+
+	/* Execute the callbacks that we grabbed before the synchronize */
+	while (worklist) {
+	    struct rcu_head * this = worklist;
+	    worklist = worklist->next;
+	    UMC_rcu_cb(this);
+	}
+    }
+
+    return E_OK;
+}
+
+/******************************************************************************/
+
 /* Deliver system timer alarms to emulated kernel timer */
 void
 UMC_alarm_handler(void * const v_timer, uint64_t const now, error_t const err)
@@ -145,7 +194,7 @@ do_exit(long rc)
     sys_thread_exit(rc);
 }
 
-/* kthread starts running on-thread */
+/* kthread running on-thread */
 error_t
 UMC_kthread_fn(void * v_task)
 {
@@ -175,6 +224,8 @@ UMC_kthread_fn(void * v_task)
     return ret;
 }
 
+struct _irqthread * UMC_irqthread;	/* delivers "softirq" callbacks */
+
 /* irqthread runs event_task on-thread */
 error_t
 UMC_irqthread_fn(void * v_irqthread)
@@ -193,7 +244,9 @@ UMC_irqthread_fn(void * v_irqthread)
     return ret;
 }
 
-/* work queue thread starts running on-thread */
+struct workqueue_struct * UMC_workq;	/* general-purpose work queue */
+
+/* work queue thread running on-thread */
 static error_t
 _UMC_work_queue_thr(struct workqueue_struct * workq, char * wq_name)
 {
@@ -243,7 +296,7 @@ UMC_work_queue_thr(void * v_workq)
 
 #ifdef UMC_TASKLETS
 
-/* tasklet thread starts running on-thread */
+/* tasklet thread running on-thread */
 static error_t
 _UMC_tasklet_thr(struct tasklet_struct * tasklet, const char * tasklet_name)
 {
@@ -1129,6 +1182,8 @@ UMC_init(char * mountname)
     error_t err = UMC_fuse_start(mountname);
     expect_noerr(err, "UMC_fuse_start");
 
+    UMC_rcu_cb_thr = kthread_run(UMC_rcu_cb_fn, NULL, "%s", "RCU_callback");
+
     UMC_irqthread = irqthread_run("UMC_irqthread");
 
     UMC_workq = create_workqueue("UMC_workq");
@@ -1168,6 +1223,8 @@ UMC_exit(void)
 	UMC_irqthread = NULL;
     } else
 	sys_warning("UMC_exit called on UMC_irqthread");
+
+    //XXXX flush RCU callbacks and kill UMC_rcu_cb_thr
 
     /* Our caller does the pthread_exit */
     return err;

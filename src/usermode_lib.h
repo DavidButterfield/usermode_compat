@@ -599,17 +599,9 @@ extern void si_meminfo(struct sysinfo *si);
 #define free_page(addr)			free_pages((addr), 0)
 #define free_pages(addr, order)		kfree((void *)addr)
 
-#ifndef ARENA_DISABLE
-#define ARENA_DISABLE false
-#endif
-
 //XXX ADD mem_buf_allocator_set() to the sys_services API
-#if ARENA_DISABLE
-#define mem_buf_allocator_set(buf, caller_id) DO_NOTHING()
-#else
 extern void _mem_buf_allocator_set(void * buf, sstring_t caller_id);
 #define mem_buf_allocator_set(buf, caller_id) _mem_buf_allocator_set((buf), (caller_id))
-#endif
 
 /* Note: this is not about the simulated kernel page cache */
 #ifndef PAGE_CACHE_SHIFT
@@ -1350,12 +1342,12 @@ struct lockdep_map { };
 
 /*** RCU Synchronization (faked using rw_lock) ***/
 
-#define __rcu				/* compiler thing */
-extern rwlock_t				UMC_rcu_lock;
+extern rwlock_t				UMC_rcu_lock;	/* the global pseudo-RCU lock */
 
+/* Embedded in each RCU-protected structure */
 struct rcu_head {
-    void			      * next;
-    void			      (*func)(struct rcu_head *);
+    void				* next;
+    void				(*func)(struct rcu_head *);
 };
 
 /* Readers */
@@ -1363,49 +1355,55 @@ struct rcu_head {
 #define rcu_read_unlock()		read_unlock(&UMC_rcu_lock)
 #define _rcu_assert_readlocked()	rwlock_assert_readlocked(&UMC_rcu_lock)
 
-/* These are only supposed to be used under rcu_read_lock(), right? XXX */
+/* These are only supposed to be used under rcu_read_lock(), right? XXX */  //XXXXXX retry assertion
 #define rcu_dereference(ptr)		({ /* XXX _rcu_assert_readlocked(); */ (ptr); })
 
 #define list_for_each_entry_rcu(p, h, m) /* _rcu_assert_readlocked(); */ \
-					 list_for_each_entry((p), (h), m)
-
-/* Writers */
-#define _rcu_write_lock()		write_lock(&UMC_rcu_lock)
-#define _rcu_write_unlock()		write_unlock(&UMC_rcu_lock)
+					 list_for_each_entry((p), (h), m)   //XXXXXX retry assertion
 
 #define rcu_dereference_protected(p, c) ({ assert(c); (p); })
 
-#define rcu_assign_pointer(ptr, val)	do { _rcu_write_lock(); \
+/* Writers */
+#define UMC_rcu_write_lock()		write_lock(&UMC_rcu_lock)
+#define UMC_rcu_write_unlock()		write_unlock(&UMC_rcu_lock)
+
+#define rcu_assign_pointer(ptr, val)	do { UMC_rcu_write_lock(); \
 					     (ptr) = (val); \
-					     _rcu_write_unlock(); \
+					     UMC_rcu_write_unlock(); \
 					} while (0)
 
-/* Does func(head) under RCU write lock */
-//XXXXX Give this to a worker thread to do
-#define call_rcu(head, func)		do { _rcu_write_lock(); \
-					     (func)(head); \
-					     _rcu_write_unlock(); \
-					} while (0)
-
-//XXX check this
-#define synchronize_rcu()		do { _rcu_write_lock(); \
-					     _rcu_write_unlock(); \
-					} while (0)
-
-#define list_add_rcu(elem, list)	do { _rcu_write_lock(); \
+#define list_add_rcu(elem, list)	do { UMC_rcu_write_lock(); \
 					     list_add(elem, list); \
-					     _rcu_write_unlock(); \
+					     UMC_rcu_write_unlock(); \
 					} while (0)
 
-#define list_add_tail_rcu(elem, list)	do { _rcu_write_lock(); \
+#define list_add_tail_rcu(elem, list)	do { UMC_rcu_write_lock(); \
 					     list_add_tail(elem, list); \
-					     _rcu_write_unlock(); \
+					     UMC_rcu_write_unlock(); \
 					} while (0)
 
-#define list_del_rcu(elem)		do { _rcu_write_lock(); \
+#define list_del_rcu(elem)		do { UMC_rcu_write_lock(); \
 					     list_del(elem); \
-					     _rcu_write_unlock(); \
+					     UMC_rcu_write_unlock(); \
 					} while (0)
+
+extern struct rcu_head		      * UMC_rcu_cb_list;
+extern spinlock_t			UMC_rcu_cb_list_lock;
+
+#define call_rcu(head, fn)		do { (head)->func = fn; \
+					     spin_lock(&UMC_rcu_cb_list_lock); \
+					     (head)->next = UMC_rcu_cb_list; \
+					     if (!UMC_rcu_cb_list) \
+						wake_up(&UMC_rcu_cb_wake); \
+					     UMC_rcu_cb_list = (head); \
+					     spin_unlock(&UMC_rcu_cb_list_lock); \
+					} while (0)
+
+#define synchronize_rcu()		do { UMC_rcu_write_lock(); \
+					     UMC_rcu_write_unlock(); \
+					} while (0)
+
+#define __rcu				/* neutralize some kernel compiler thing */
 
 /*** kref ***/
 
@@ -1657,6 +1655,8 @@ typedef struct wait_queue_head {
     bool	   volatile initialized;
     bool		    is_exclusive;   /* validate XXX limitation assumption */
 } wait_queue_head_t;
+
+extern wait_queue_head_t		UMC_rcu_cb_wake;    //XXX belongs above
 
 struct wait_queue_entry			{ };
 #define DEFINE_WAIT(name)		struct wait_queue_entry name = { }
@@ -1938,7 +1938,7 @@ _flush_signals(struct task_struct * task, sstring_t caller_id)
  */
 #define WAITQ_CHECK_INTERVAL	sys_time_delta_of_ms(100)   /* signal/kthread_stop check interval */
 
-/* Returns true if the condition was met.
+/* Returns true if condition COND was seen to be met, false if it times out.
  * If INNERLOCKP != NULL, lock acquisition order is LOCKP, INNERLOCKP;
  * The pthread_cond_timedwait() call drops the (outer or solitary) LOCKP
  *
@@ -1960,7 +1960,7 @@ _flush_signals(struct task_struct * task, sstring_t caller_id)
 					    .tv_nsec = sys_time_delta_mod_sec(_t_end)  }; \
 		    while (!(COND)) { \
 			if (unlikely(time_after_eq(sys_time_now(), _t_end))) { \
-			    _wait_ret = false; \
+			    _wait_ret = !!(COND); \
 			    break; \
 			} \
 			if (INNERLOCKP) \
@@ -1972,9 +1972,10 @@ _flush_signals(struct task_struct * task, sstring_t caller_id)
 			    spin_lock(INNERLOCKP); \
 			\
 			if (unlikely(signal_pending(current)) && \
-				    current->state != TASK_UNINTERRUPTIBLE) \
-			    _wait_ret = (COND); \
-			else if (unlikely(_err != ETIMEDOUT)) \
+				    current->state != TASK_UNINTERRUPTIBLE) { \
+			    _wait_ret = !!(COND); \
+			    break; \
+			} else if (unlikely(_err != ETIMEDOUT)) \
 			    expect_noerr(_err, "pthread_cond_timedwait"); \
 		    } \
 		} \
@@ -2006,7 +2007,7 @@ _flush_signals(struct task_struct * task, sstring_t caller_id)
 	    } while (0)
 
 /* Common internal helper for Non-exclusive wakeups */
-/* Returns nonzero if the condition was met */
+/* Returns true if condition COND was seen to be met, false if it times out. */
 #define _wait_event_timeout(WAITQ, COND, t_end) \
 	    ({ \
 		expect_eq((WAITQ).is_exclusive, false, "Mixed waitq exclusivity"); \
@@ -2023,10 +2024,12 @@ _flush_signals(struct task_struct * task, sstring_t caller_id)
 /* Non-exclusive wakeup with NO timeout */
 #define wait_event(WAITQ, COND)	_wait_event_timeout((WAITQ), (COND), SYS_TIME_MAX)
 
-/* Returns ticks remaining if the condition was met */
+/* Returns ticks remaining (minimum one) if the condition was seen to be met.
+ * Returns zero if it times out.
+ */
 #define wait_event_timeout(WAITQ, COND, jdelta) \
 	    ({ \
-		unsigned long wet_ret = 1; \
+		bool cond_met = true; \
 		sys_time_t next_check; \
 		sys_time_t now = sys_time_now(); \
 		sys_time_t t_end = now + jiffies_to_sys_time(jdelta); \
@@ -2034,26 +2037,30 @@ _flush_signals(struct task_struct * task, sstring_t caller_id)
 		    t_end = SYS_TIME_MAX;	/* overflow */ \
 		if (!(COND)) do { \
 		    if (kthread_should_stop()) { \
-			wet_ret = 0; /* pretend like we timed out */ \
+			cond_met = !!(COND); /* pretend like we timed out */ \
 			break; \
 		    } \
 		    now = sys_time_now(); \
 		    if (time_after_eq(now, t_end)) { \
-			wet_ret = 0; \
+			cond_met = !!(COND); \
 			break; \
 		    } \
 		    if (t_end - now < WAITQ_CHECK_INTERVAL) next_check = t_end; \
 		    else next_check = now + WAITQ_CHECK_INTERVAL; \
 		} while (!_wait_event_timeout((WAITQ), (COND), next_check)); \
 		now = sys_time_now(); \
-		wet_ret <= 0 ? wet_ret : time_after_eq(now, t_end) ? 0 : jiffies_of_sys_time(t_end - now); \
+		/* return */ \
+		!cond_met ? 0 : time_after_eq(now, t_end) ? 1 : \
+					    jiffies_of_sys_time(t_end - now) ?: 1; \
 	    })
 
-/* Non-exclusive wakeup WITH timeout, and periodic checks for kthread_should_stop */
-/* Returns ticks remaining if the condition was met, 0 if timeout elapsed, or -ERESTARTSYS */
+/* Non-exclusive wakeup WITH timeout, and periodic checks for kthread_should_stop.
+ * Returns ticks remaining (minimum one) if the condition was seen to be met.
+ * Returns zero if it times out, or -ERESTARTSYS if interrupted.
+ */
 #define wait_event_interruptible_timeout(WAITQ, COND, jdelta) \
 	    ({ \
-		unsigned long weit_ret = 1; \
+		int weit_ret = 1; \
 		sys_time_t next_check; \
 		sys_time_t now = sys_time_now(); \
 		sys_time_t t_end = now + jiffies_to_sys_time(jdelta); \
@@ -2061,27 +2068,29 @@ _flush_signals(struct task_struct * task, sstring_t caller_id)
 		    t_end = SYS_TIME_MAX;	/* overflow */ \
 		if (!(COND)) do { \
 		    if (kthread_should_stop()) { \
-			weit_ret = -ERESTARTSYS; \
+			weit_ret = !!(COND) ? 1 : -ERESTARTSYS; \
 			break; \
 		    } \
 		    if (signal_pending(current)) { \
-			weit_ret = -ERESTARTSYS; \
+			weit_ret = !!(COND) ? 1 : -ERESTARTSYS; \
 			break; \
 		    } \
 		    now = sys_time_now(); \
 		    if (time_after_eq(now, t_end)) { \
-			weit_ret = 0; \
+			weit_ret = !!(COND); \
 			break; \
 		    } \
 		    if (t_end - now < WAITQ_CHECK_INTERVAL) next_check = t_end; \
 		    else next_check = now + WAITQ_CHECK_INTERVAL; \
 		} while (!_wait_event_timeout((WAITQ), (COND), next_check)); \
 		now = sys_time_now(); \
-		weit_ret <= 0 ? weit_ret : time_after_eq(now, t_end) ? 0 : jiffies_of_sys_time(t_end - now); \
+		/* return */ \
+		weit_ret <= 0 ? weit_ret : time_after_eq(now, t_end) ? 1 : \
+					    jiffies_of_sys_time(t_end - now) ?: 1; \
 	    })
 
 /* Non-exclusive wakeup with NO timeout, with periodic checks for kthread_should_stop */
-/* Returns E_OK (zero) if the condition was met, -ERESTARTSYS if signalled out */
+/* Returns E_OK (zero) if the condition was seen to be met, otherwise -ERESTARTSYS */
 #define wait_event_interruptible(WAITQ, COND) \
 	    ({ \
 		sys_time_t next_check; \
