@@ -119,8 +119,7 @@ pde_node_fmt(struct proc_dir_entry * pde, char * buf, size_t size, off_t * lofsp
     struct file * file = record_alloc(file);
 
     file->inode = &pi->vfs_inode;
-    init_inode(file->inode, I_TYPE_PROC, pde->mode, 0, 0);
-    file->inode->UMC_fd = -1;
+    init_inode(file->inode, I_TYPE_PROC, pde->mode, 0, 0, -1);
 
     struct proc_inode * pi_check = PROC_I(file->inode);
     assert_eq(pi_check, pi);
@@ -313,8 +312,8 @@ pde_write(struct proc_dir_entry * pde_root, char const * path,
     struct file * file = record_alloc(file);
 
     file->inode = &pi->vfs_inode;
-    init_inode(file->inode, I_TYPE_PROC, 0666, 0, 0);
-    file->inode->UMC_fd = -1;
+    init_inode(file->inode, I_TYPE_PROC, 0666, 0, 0, -1);
+
     struct proc_inode * pi_check = PROC_I(file->inode);
     assert_eq(pi_check, pi);
     pi->pde = pde;

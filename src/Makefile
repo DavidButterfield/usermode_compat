@@ -15,8 +15,8 @@ MY_CFLAGS += -DDEBUG
 # MY_CFLAGS += -DTRACE_TRACE
 # MY_CFLAGS += -DTRACE_VERBOSE
 
-# MY_CFLAGS += -O0
-MY_CFLAGS += -Og
+MY_CFLAGS += -O0
+# MY_CFLAGS += -Og
 # MY_CFLAGS += -O1
 # MY_CFLAGS += -O2
 # MY_CFLAGS += -O3
@@ -161,6 +161,7 @@ _klib:
 	@#cp $(REF_KERNEL)/lib/libcrc32c.c			klib
 	@ cp $(REF_KERNEL)/lib/nlattr.c				klib
 	@ cp $(REF_KERNEL)/lib/rbtree.c				klib
+	@ cp $(REF_KERNEL)/lib/dec_and_lock.c			klib
 
 # The ones that are commented out will require more work than simply uncommenting them!
 # They have never been tried nor had their depedencies determined

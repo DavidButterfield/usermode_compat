@@ -175,7 +175,57 @@ UMC_delayed_work_process(uintptr_t u_dwork)
 
 /******************************************************************************/
 
-#define trace_thread_verbose(fmtargs...)    //  sys_notice(fmtargs)
+#define trace_thread(fmtargs...)    //  sys_notice(fmtargs)
+
+struct task_struct *
+_kthread_run(error_t (*fn)(void * env), void * env, string_t name, sstring_t caller_id)
+{
+    struct task_struct * task = _kthread_create(fn, env, name, caller_id);
+    assert(task);
+    wake_up_process(task);
+    return task;	    /* started OK */
+}
+
+struct task_struct *
+kthread_run_shutdown(error_t (*fn)(void * env), void * env)
+{
+    return kthread_run(fn, env, "shutdown_thread");
+}
+
+/* Marks kthread for exit, waits for it to exit, and returns its exit code */
+error_t
+kthread_stop(struct task_struct * task)
+{
+    verify(task != current, "task %s (%u) cannot kthread_stop itself",
+			    task->comm, task->pid);
+    sys_notice("kthread_stop by %s (%u) of %s (%u)",
+		current->comm, current->pid, task->comm, task->pid);
+
+    task->should_stop = true;
+
+    /* Wait for the thread to exit */
+    if (!wait_for_completion_timeout(&task->stopped, 2 * HZ)) {
+	/* Too slow -- jab it */
+	sys_warning("kthread_stop of %s (%u) excessive wait -- attempting signal",
+		    task->comm, task->pid);
+	force_sig(SIGSTKFLT, task);	/* try to get a stacktrace */
+	if (!wait_for_completion_timeout(&task->stopped, 3 * HZ)) {
+	    sys_warning("kthread_stop of %s (%u) excessive wait -- giving up",
+			task->comm, task->pid);
+	    return -EBUSY;
+	}
+    }
+
+    /* Take the lock to sync with the end of UMC_kthread_fn() */
+    spin_lock(&task->stopped.wait.lock);    /* no matching unlock */
+
+    error_t const ret = task->exit_code;
+
+    sys_thread_free(task->SYS);
+    UMC_current_free(task);
+
+    return ret;
+}
 
 /* The running kthread exits.
  *
@@ -201,10 +251,8 @@ UMC_kthread_fn(void * v_task)
     struct task_struct * task = v_task;
     UMC_current_set(task);
 
-    trace_thread_verbose("Thread %s (%p, %u) starts task->SYS %s (%p) task %s (%p)\n",
-	     sys_thread_name(sys_thread), sys_thread, gettid(),
-	     sys_thread_name(task->SYS), task->SYS,
-	     task->comm, task);
+    trace_thread("Thread %s (%u) starts kthread task %s (%p)\n",
+		sys_thread_name(sys_thread), gettid(), task->comm, task);
 
     /* Let our creating thread return from kthread_create() */
     complete(&task->started);
@@ -215,7 +263,18 @@ UMC_kthread_fn(void * v_task)
 				      /*** Run the kthread logic ***/
     error_t ret = task->exit_code = task->run_fn(task->run_env);
 
-    /* Let our stopping thread return from kthread_stop() */
+    sys_notice("Thread %s (%u) EXITS kthread (task %s (%p))\n",
+		sys_thread_name(sys_thread), gettid(), task->comm, task);
+
+    /* If this thread is not being stopped by another thread,
+     * then do self-cleanup through do_exit()
+     */
+    if (!kthread_should_stop())
+	do_exit(0);
+
+    /* Let our stopping thread return from kthread_stop().
+     * The stopping thread will free our current and sys_thread.
+     */
     spin_lock(&task->stopped.wait.lock);
     complete(&task->stopped);
     spin_unlock(&task->stopped.wait.lock);
@@ -231,13 +290,20 @@ error_t
 UMC_irqthread_fn(void * v_irqthread)
 {
     struct _irqthread * irqthread = v_irqthread;
-    UMC_current_set(irqthread->current);
+    struct task_struct * task = irqthread->current;
+    UMC_current_set(task);
+
+    trace_thread("Thread %s (%u) starts irqthread task %s (%p)\n",
+		sys_thread_name(sys_thread), gettid(), task->comm, task);
 
     complete(&irqthread->started);
     //XXX affinity?
     //XXX wait for start release?
 
     error_t ret = sys_event_task_run(irqthread->event_task);  /*** run the event_task logic ***/
+
+    sys_notice("Thread %s (%u) EXITS irqthread task %s (%p)\n",
+		sys_thread_name(sys_thread), gettid(), task->comm, task);
 
     complete(&irqthread->stopped);
 	/*** Note this exiting thread's "sys_thread" and "current" may no longer exist ***/
@@ -362,6 +428,7 @@ static void
 device_release(struct kobject *kobj)
 {
     struct device * dev = container_of(kobj, struct device, kobj);
+    record_free(dev->disk);
     record_free(dev);
 }
 
@@ -388,8 +455,8 @@ kfree_skb(struct sk_buff *skb)
 	if (!atomic_dec_and_test(&skb->users))
 	    return;
 	if (skb->head)
-	    kfree(skb->head);
-	kfree(skb);
+	    vfree(skb->head);
+	record_free(skb);
 }
 
 struct sk_buff *
@@ -453,10 +520,7 @@ skb_put(struct sk_buff *skb, unsigned int len)
 
 /******************************************************************************/
 
-struct net init_net = {
-    .count	    = ATOMIC_INIT(1),
-    .dev_base_head  = LIST_HEAD_INIT(init_net.dev_base_head),
-};
+struct net init_net;
 
 void
 UMC_sock_filladdrs(struct socket * sock)
@@ -642,7 +706,7 @@ UMC_sock_shutdown(struct socket * sock, int k_how)
     return shutdown(sock->sk->fd, u_how);
 }
 
-//XXXX What is the precise difference between disconnect and shutdown(RW)?
+//XXX What is the precise difference between disconnect and shutdown(RW)?
 //XXX Where is the intended semantic of sk_prot->disconnect documented?
 void
 UMC_sock_discon(struct sock * sk, int XXX)
@@ -745,16 +809,16 @@ restart:
 	    msg->msg_iov->iov_len -= skipbytes;
 	}
     } else if (rc == 0) {
-	sys_notice("%s: EOF on fd=%d flags=0x%x", caller_id, (sock)->sk->fd, flags);
+	sys_notice("%s: EOF on fd=%d flags=0x%x", caller_id, sock->sk->fd, flags);
     } else {
 	if (rc == -EINTR) {
 	    sys_notice("%s: recvmsg returns -EINTR on fd=%d flags=0x%x",
-			    caller_id, (sock)->sk->fd, flags);
+			    caller_id, sock->sk->fd, flags);
 	} else if (rc == -EAGAIN) {
 	    if (!(flags & MSG_DONTWAIT)) {  //XXXX probably SO_NONBLOCK too
 		if (sock->sk->UMC_rcvtimeo == 0 || sock->sk->UMC_rcvtimeo >= JIFFY_MAX) {
 #ifdef TRACE_socket
-		    sys_notice("%s: recvmsg ignores -EAGAIN on fd=%d flags=0x%x", caller_id, (sock)->sk->fd, flags);
+		    sys_notice("%s: recvmsg ignores -EAGAIN on fd=%d flags=0x%x", caller_id, sock->sk->fd, flags);
 #endif
 		    usleep(100);	    //XXXXX
 		    goto restart;   //XXX doesn't adjust time remaining
@@ -762,7 +826,7 @@ restart:
 		#define T_SLOP jiffies_to_sys_time(1)
 		if (sys_time_now() < t_end - T_SLOP) {
 		    sys_notice("%s: recvmsg ignores early -EAGAIN on fd=%d now=%lu end=%lu flags=0x%x",
-				caller_id, (sock)->sk->fd, sys_time_now(), t_end, flags);
+				caller_id, sock->sk->fd, sys_time_now(), t_end, flags);
 		    usleep(100);	    //XXXXX
 		    goto restart;   //XXX doesn't adjust time remaining
 		}
@@ -776,7 +840,7 @@ restart:
 	    }
 	} else {
 	    sys_warning("%s: ERROR %"PRId64" '%s'on fd=%d flags=0x%x", caller_id,
-			    rc, strerror((int)-rc), (sock)->sk->fd, flags);
+			    rc, strerror((int)-rc), sock->sk->fd, flags);
 	}
     }
     return (int)rc;
@@ -883,7 +947,7 @@ netlink_xmit(struct sock *sk, struct sk_buff *skb, uint32_t pid, uint32_t group,
     skb->data += nsent;
     skb->len -= nsent;
 
-    kfree_skb(skb);
+    kfree_skb(skb);	/* drop one reference to the skb */
 
     return E_OK;
 }
@@ -1053,7 +1117,7 @@ extern void UMC_genl_init(void);
 
 /* Open a datagram socket for the kernel side of the simulated netlink */
 static void
-establish_netlink(void)
+netlink_establish(void)
 {
     if (init_net.genl_sock) {
 	sys_warning("netlink server already established!");
@@ -1080,7 +1144,7 @@ establish_netlink(void)
 	close(fd);
 
     } else {
-	sys_notice("starting netlink server");
+	sys_notice("starting netlink server fd=%d", fd);
 
 	struct file * file = _fget(fd);
 	if (!file) {
@@ -1108,6 +1172,20 @@ establish_netlink(void)
     }
 }
 
+static void
+netlink_shutdown(void)
+{
+    struct sock * sk = init_net.genl_sock;
+    if (!sk) {
+	sys_warning("netlink server not established!");
+	return;
+    }
+    sys_notice("CLOSE netlink fd=%d", sk->fd);
+
+    sock_release(sock_of_sk(sk));
+    init_net.genl_sock = NULL;
+}
+
 /******************************************************************************/
 
 void
@@ -1122,6 +1200,10 @@ UMC_sig_handler(int signo)
 {
     sys_notice("REAL SIGNAL %u (0x%lx) received by task %s (%d), pending: 0x%lx",
 	    signo, 1L<<signo, current->comm, current->pid, current->signals_pending);
+    if (current->signals_pending & (1<<SIGSTKFLT)) {
+	current->signals_pending &= ~ (1<<SIGSTKFLT);
+	sys_backtrace("SIGSTKFLT");
+    }
 }
 
 /* Setup for emulated inter-thread signals with a real signal */
@@ -1149,6 +1231,9 @@ signal_pending(struct task_struct * task)
 error_t
 UMC_init(char * mountname)
 {
+    sys_tz.tz_minuteswest = timezone/60;    /* see tzset(3) */
+    sys_tz.tz_dsttime = daylight;	    /* see tzset(3) */
+
     idr_init_cache();
 
     /* Initialize a page of zeros for general use */
@@ -1178,7 +1263,11 @@ UMC_init(char * mountname)
 	nr_cpu_ids = CPU_COUNT(&mask);
     }
 
-    /* fuse forks, so do it before opening file descriptors */
+    UMC_sig_setup();
+
+    /* Threads */
+
+    /* fuse forks, so start it before anything that opens file descriptors */
     error_t err = UMC_fuse_start(mountname);
     expect_noerr(err, "UMC_fuse_start");
 
@@ -1188,12 +1277,7 @@ UMC_init(char * mountname)
 
     UMC_workq = create_workqueue("UMC_workq");
 
-    sys_tz.tz_minuteswest = timezone/60;    /* see tzset(3) */
-    sys_tz.tz_dsttime = daylight;	    /* see tzset(3) */
-
-    establish_netlink();
-
-    UMC_sig_setup();
+    netlink_establish();
 
     return E_OK;
 }
@@ -1201,8 +1285,8 @@ UMC_init(char * mountname)
 error_t
 UMC_exit(void)
 {
-    assert(current);
     error_t err;
+    assert(current);
 
     err = UMC_fuse_stop();
     if (err == -EINVAL) { /* XXX Ignore for the SIGINT hack */ }
@@ -1213,20 +1297,18 @@ UMC_exit(void)
 	expect_noerr(err, "UMC_fuse_exit");
     }
 
+    netlink_shutdown();
+
+    irqthread_stop(UMC_irqthread);
+    irqthread_destroy(UMC_irqthread);
+    UMC_irqthread = NULL;
+
     flush_workqueue(UMC_workq);
     destroy_workqueue(UMC_workq);
     UMC_workq = NULL;
 
-    if (UMC_irqthread->SYS != sys_thread_current()) {
-	irqthread_stop(UMC_irqthread);
-	irqthread_destroy(UMC_irqthread);
-	UMC_irqthread = NULL;
-    } else
-	sys_warning("UMC_exit called on UMC_irqthread");
+    kthread_stop(UMC_rcu_cb_thr);
 
-    //XXXX flush RCU callbacks and kill UMC_rcu_cb_thr
-
-    /* Our caller does the pthread_exit */
     return err;
 }
 
@@ -1270,6 +1352,8 @@ UMC_sched_setscheduler(struct task_struct * task, int policy, struct sched_param
 
 #include "UMC_genl.c"
 
+/* Import source from the reference kernel */
+#include "klib/dec_and_lock.c"
 #include "klib/bitmap.c"
 #include "klib/idr.c"
 // #include "klib/libcrc32c.c"
