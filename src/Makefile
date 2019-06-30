@@ -157,11 +157,16 @@ _klib:
 	@# Get some .c files from the reference kernel
 	@ mkdir -p klib
 	@ cp $(REF_KERNEL)/lib/bitmap.c				klib
-	@ cp $(REF_KERNEL)/lib/idr.c				klib
 	@#cp $(REF_KERNEL)/lib/libcrc32c.c			klib
 	@ cp $(REF_KERNEL)/lib/nlattr.c				klib
 	@ cp $(REF_KERNEL)/lib/rbtree.c				klib
 	@ cp $(REF_KERNEL)/lib/dec_and_lock.c			klib
+	@ make klib/idr.c
+
+klib/idr.c:
+	@ cp $(REF_KERNEL)/lib/idr.c				klib/idr.c
+	@ echo "" >> klib/idr.c
+	@ echo "void __exit idr_exit_cache(void) { kmem_cache_destroy(idr_layer_cache); }" >> klib/idr.c
 
 # The ones that are commented out will require more work than simply uncommenting them!
 # They have never been tried nor had their depedencies determined

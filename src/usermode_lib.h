@@ -150,7 +150,6 @@ extern ssize_t pwritev (int __fd, const struct iovec *, int __count, __off_t);
 
 /* Compiler hints */
 #define __pure				__attribute__((__pure__))
-#define __unused			__attribute__((__unused__))
 #define __noreturn			__attribute__((__noreturn__))
 #define __must_check			__attribute__((__warn_unused_result__))
 #define __aligned(align)		__attribute__((__aligned__(align)))
@@ -466,18 +465,18 @@ extern struct module __this_module;
 #define module_exit(fn)		 extern void _CONCAT(UMC_EXIT_, fn)(void); \
 					void _CONCAT(UMC_EXIT_, fn)(void) { fn(); }
 
-#define MODULE_VERSION(str) static __unused \
+#define MODULE_VERSION(str) static __attribute__((__unused__)) \
 		string_t MODULE_VERSION = ("MODULE_VERSION='"str"_LIB'" \
 						"(adapted to usermode)")
 
-#define MODULE_LICENSE(str) static __unused \
+#define MODULE_LICENSE(str) static __attribute__((__unused__)) \
 		string_t MODULE_LICENSE = ("MODULE_LICENSE='"str"'")
 
-#define MODULE_AUTHOR(str) static __unused \
+#define MODULE_AUTHOR(str) static __attribute__((__unused__)) \
 		string_t _CONCAT(MODULE_AUTHOR, __LINE__) = \
 			    ("MODULE_AUTHOR='"str"'\nUsermode adaptations by DAB")
 
-#define MODULE_DESCRIPTION(str) static __unused \
+#define MODULE_DESCRIPTION(str) static __attribute__((__unused__)) \
 		string_t MODULE_DESCRIPTION = ("MODULE_DESCRIPTION='"str"'")
 
 #define MODULE_NAME_LEN			56
@@ -4483,8 +4482,6 @@ static inline _DIRTY void put_unaligned_le64(uint64_t v, void * p) { *(uint64_t 
 
 /*** Netlink (implemented as UDP/IPv4) ***/
 
-//XXXXX fix leak: netlink skbs are not getting freed
-
 extern void genl_rcv(struct sk_buff *skb);
 
 #include <linux/netlink.h>
@@ -4494,9 +4491,10 @@ extern void genl_rcv(struct sk_buff *skb);
 extern error_t netlink_xmit(struct sock *sk, struct sk_buff *skb, u32 pid, u32 group, int nonblock);
 
 #define netlink_unicast(sk, skb, pid, nonblock) \
-	    netlink_xmit((sk), (skb), (pid), 0, (nonblock))
+    netlink_xmit((sk), (skb), (pid), 0, (nonblock))
 
-#define netlink_broadcast(sk, skb, pid, group, flags) ({ kfree_skb(skb); E_OK; })   //XXXXX
+#define netlink_broadcast(sk, skb, pid, group, flags) \
+    netlink_xmit((sk), (skb), (pid), (group), 0)
 
 #define read_pnet(pnet)			    (&init_net)
 #define write_pnet(pnet, x)		    DO_NOTHING()
@@ -4578,6 +4576,8 @@ struct ahash_request { };
 #include <linux/rbtree.h>
 #include <linux/ioctl.h>
 #include <linux/swab.h>
+
+void __exit idr_exit_cache(void);
 
 //#undef pr_fmt	//XXX
 

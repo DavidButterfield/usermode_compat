@@ -411,7 +411,7 @@ static struct fuse_operations const pde_ops = {
 
 /******************************************************************************/
 
-static string_t __unused
+static string_t __attribute__((__unused__))
 pde_tree_fmt(struct proc_dir_entry * pde_root)
 {
     if (pde_root == NULL) pde_root = PDE_ROOT;
