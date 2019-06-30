@@ -161,7 +161,7 @@ _klib:
 	@ cp $(REF_KERNEL)/lib/nlattr.c				klib
 	@ cp $(REF_KERNEL)/lib/rbtree.c				klib
 	@ cp $(REF_KERNEL)/lib/dec_and_lock.c			klib
-	@ make klib/idr.c
+	@ $(MAKE) klib/idr.c
 
 klib/idr.c:
 	@ cp $(REF_KERNEL)/lib/idr.c				klib/idr.c

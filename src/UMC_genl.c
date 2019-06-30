@@ -211,6 +211,7 @@ int genl_register_mc_group(struct genl_family *family,
 	genl_unlock();
 	return err;
 #else
+	grp->id = 2;
 	return 0;
 #endif
 }

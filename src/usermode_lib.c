@@ -925,22 +925,30 @@ on_netlink_error(struct sock * sk)
 error_t
 netlink_xmit(struct sock *sk, struct sk_buff *skb, uint32_t pid, uint32_t group, int nonblock)
 {
+    int flags = MSG_NOSIGNAL;
     // XXX there is no logic here to support xmit-ready callbacks, so always do synchronous
-    // int flags = MSG_NOSIGNAL | (nonblock ? MSG_DONTWAIT : 0);
+    // flags |= nonblock ? MSG_DONTWAIT : 0;
+
     struct sockaddr_in dst_addr = {
 	.sin_family = AF_INET,
-	.sin_addr = { .s_addr = htonl(0x7f000001) },
+	.sin_addr = { .s_addr = htonl(INADDR_LOOPBACK) },
 	.sin_port = htons((uint16_t)pid),
 	.sin_zero = { 0 },
     };
-    int flags = MSG_NOSIGNAL;
+
+    if (group) {
+	if (group < 32) {
+	    dst_addr.sin_addr.s_addr = htonl(224<<24 | 0<<16 | 0<<8 | group);	//XXXXXX
+	    dst_addr.sin_port = 7789;						//XXXXXX
+	} else
+	    sys_warning("multicast group=%d out of range [1-31]", group);
+    }
 
     ssize_t nsent = sendto(sk->fd, skb->data, skb->len, flags, &dst_addr, sizeof(dst_addr));
 
     error_t ret = UMC_kernelize(nsent);
     if (ret < 0) {
-	perror("send: ");
-	sys_warning("error sending on netlink fd=%d", sk->fd);
+	sys_warning("error %d sending on netlink fd=%d", ret, sk->fd);
 	return ret;
     }
 
@@ -1076,31 +1084,29 @@ on_netlink_recv(struct sock * sk, int len)
     expect_eq(len, 0);
 
     struct sk_buff * skb = alloc_skb(NETLINK_BUFSIZE, IGNORED);
-    skb->sk = sk;
 
     struct sockaddr_in src_addr;
     socklen_t addrlen = sizeof(src_addr);
-    ssize_t rc = recvfrom(sk->fd, skb_tail_pointer(skb), NETLINK_BUFSIZE,
-			    MSG_DONTWAIT, &src_addr, &addrlen);
+    ssize_t rc = UMC_kernelize(recvfrom(sk->fd, skb_tail_pointer(skb),
+			NETLINK_BUFSIZE, MSG_DONTWAIT, &src_addr, &addrlen));
 
     if (rc <= 0) {
-	if (rc == 0)
-	    sys_notice("EOF on netlink fd=%d", sk->fd);
-	else {
-	    if (errno == EAGAIN) {
-		sys_notice("EAGAIN on netlink fd=%d", sk->fd);
-		return;
-	    }
-	    perror("netlink recv");
-	    sys_warning("error on netlink fd=%d", sk->fd);
-	}
-	struct socket * sock = container_of(sk, struct socket, sk_s);   /* annoying */
 	kfree_skb(skb);
+	if (rc == 0) {
+	    sys_notice("Zero-length datagram on netlink fd=%d", sk->fd);
+	    return;
+	} else if (errno == EAGAIN) {
+	    sys_notice("EAGAIN on netlink fd=%d", sk->fd);
+	    return;
+	}
+	sys_warning("error %d on netlink fd=%d", rc, sk->fd);
+
+	struct socket * sock = container_of(sk, struct socket, sk_s);   /* annoying */
 	init_net.genl_sock = NULL;  //XXXXX
+	sock_release(sock);
 
 	//XXXX Should re-establish netlink service socket
 
-	sock_release(sock);
 	return;
     }
 
@@ -1108,9 +1114,12 @@ on_netlink_recv(struct sock * sk, int len)
     skb->tail += rc;
     verify_le(skb->tail, skb->end);
 
+    skb->sk = sk;
     NETLINK_CB(skb).pid = ntohs(src_addr.sin_port);
 
     sk->netlink_rcv(skb);
+
+    kfree_skb(skb);
 }
 
 extern void UMC_genl_init(void);
@@ -1308,6 +1317,8 @@ UMC_exit(void)
     UMC_workq = NULL;
 
     kthread_stop(UMC_rcu_cb_thr);
+
+    idr_exit_cache();
 
     return err;
 }
