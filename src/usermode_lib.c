@@ -178,7 +178,7 @@ UMC_delayed_work_process(uintptr_t u_dwork)
 #define trace_thread(fmtargs...)    //  sys_notice(fmtargs)
 
 struct task_struct *
-_kthread_run(error_t (*fn)(void * env), void * env, string_t name, sstring_t caller_id)
+UMC_kthread_run(error_t (*fn)(void * env), void * env, string_t name, sstring_t caller_id)
 {
     struct task_struct * task = _kthread_create(fn, env, name, caller_id);
     assert(task);
@@ -187,7 +187,7 @@ _kthread_run(error_t (*fn)(void * env), void * env, string_t name, sstring_t cal
 }
 
 struct task_struct *
-kthread_run_shutdown(error_t (*fn)(void * env), void * env)
+UMC_run_shutdown(error_t (*fn)(void * env), void * env)
 {
     return kthread_run(fn, env, "shutdown_thread");
 }
@@ -731,7 +731,7 @@ sock_no_sendpage(struct socket *sock, struct page *page, int offset, size_t size
 }
 
 error_t
-_sock_recvmsg(struct socket * sock, struct msghdr * msg,
+UMC_sock_recvmsg(struct socket * sock, struct msghdr * msg,
 	      size_t nbytes, int flags, sstring_t caller_id)
 {
     ssize_t rc = 123456789;
@@ -846,14 +846,14 @@ restart:
     return (int)rc;
 }
 
-//XXX Probably doesn't need the "skip" from _sock_recvmsg()
+//XXX Probably doesn't need the "skip" from UMC_sock_recvmsg()
 error_t
-_kernel_recvmsg(struct socket * sock, struct msghdr * msg, struct kvec * kvec,
+UMC_kernel_recvmsg(struct socket * sock, struct msghdr * msg, struct kvec * kvec,
 		int num_sg, size_t nbytes, int flags, sstring_t caller_id)
 {
     msg->msg_iov = kvec;
     msg->msg_iovlen = num_sg;
-    return _sock_recvmsg(sock, msg, nbytes, flags, caller_id);
+    return UMC_sock_recvmsg(sock, msg, nbytes, flags, caller_id);
 }
 
 /* These are the original targets of the sk callbacks before the app intercepts them --
@@ -923,7 +923,7 @@ on_netlink_error(struct sock * sk)
 #define NETLINK_BUFSIZE 8192
 
 error_t
-netlink_xmit(struct sock *sk, struct sk_buff *skb, uint32_t pid, uint32_t group, int nonblock)
+UMC_netlink_xmit(struct sock *sk, struct sk_buff *skb, uint32_t pid, uint32_t group, int nonblock)
 {
     int flags = MSG_NOSIGNAL;
     // XXX there is no logic here to support xmit-ready callbacks, so always do synchronous
@@ -1099,7 +1099,7 @@ on_netlink_recv(struct sock * sk, int len)
 	    sys_notice("EAGAIN on netlink fd=%d", sk->fd);
 	    return;
 	}
-	sys_warning("error %d on netlink fd=%d", rc, sk->fd);
+	sys_warning("error %ld on netlink fd=%d", rc, sk->fd);
 
 	struct socket * sock = container_of(sk, struct socket, sk_s);   /* annoying */
 	init_net.genl_sock = NULL;  //XXXXX

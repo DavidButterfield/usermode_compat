@@ -1253,6 +1253,8 @@ _mutex_lock(mutex_t * m, sstring_t whence)
 #endif
     /*** SLEEP ***/
     pthread_mutex_lock(&m->lock);
+//XXXXX Use  pthread_mutex_timedlock(pthread_mutex_t *, struct timespec *);
+//XXXXX	     with a check_interval to implement mutex_lock_interruptible()
 
     /*** AWAKE ***/
 #ifdef UMC_LOCK_CHECKS
@@ -2140,7 +2142,7 @@ wait_for_completion(struct completion * c)
     while (atomic_dec_return(&c->done) < 0) {
 	/* Overdraft -- give it back */
 	atomic_inc(&c->done);
-	bool cond_met = wait_event(c->wait, atomic_read(&c->done) > 0);
+	wait_event(c->wait, atomic_read(&c->done) > 0);
     }
 }
 
@@ -2208,11 +2210,11 @@ _kthread_create(error_t (*fn)(void * env), void * env, string_t name, sstring_t 
 #endif
 
 /* Create and start a kthread */
-#define kthread_run(fn, env, fmtargs...) _kthread_run((fn), (env), sys_sprintf(fmtargs), FL_STR)
-extern struct task_struct * _kthread_run(error_t (*fn)(void * env), void * env,
+#define kthread_run(fn, env, fmtargs...) UMC_kthread_run((fn), (env), sys_sprintf(fmtargs), FL_STR)
+extern struct task_struct * UMC_kthread_run(error_t (*fn)(void * env), void * env,
 				    string_t name, sstring_t caller_id);
 
-extern struct task_struct * kthread_run_shutdown(error_t (*fn)(void * env), void * env);
+extern struct task_struct * UMC_run_shutdown(error_t (*fn)(void * env), void * env);
 
 extern error_t kthread_stop(struct task_struct *);
 
@@ -3254,7 +3256,7 @@ bdget(dev_t devt)
 #define bdevname(bdev, buf) \
 	    ({ snprintf((buf), BDEVNAME_SIZE, "%s", (bdev)->bd_disk->disk_name); (buf); })
 
-#define fsync_bdev(bdev)		//XXXXX fsync((bdev)->bd_inode->UMC_fd)
+#define fsync_bdev(bdev)		fsync((bdev)->bd_inode->UMC_fd)
 
 #define set_disk_ro(disk, flag)		((disk)->part0.policy = (flag))
 #define bdev_read_only(bdev)		((bdev)->bd_disk->part0.policy != 0)
@@ -3882,13 +3884,13 @@ extern ssize_t kernel_sendmsg(struct socket * sock, struct msghdr * msg,
 				struct kvec * vec, int nvec, size_t nbytes);
 
 #define sock_recvmsg(sock, msg, nb, f) \
-	    _sock_recvmsg((sock), (msg), (nb), (f), FL_STR)
-extern error_t _sock_recvmsg(struct socket * sock, struct msghdr * msg,
+	    UMC_sock_recvmsg((sock), (msg), (nb), (f), FL_STR)
+extern error_t UMC_sock_recvmsg(struct socket * sock, struct msghdr * msg,
 		size_t nbytes, int flags, sstring_t caller_id);
 
 #define kernel_recvmsg(sock, msg, vec, nsg, nb, f) \
-	    _kernel_recvmsg((sock), (msg), (vec), (nsg), (nb), (f), FL_STR)
-extern error_t _kernel_recvmsg(struct socket * sock, struct msghdr * msg,
+	    UMC_kernel_recvmsg((sock), (msg), (vec), (nsg), (nb), (f), FL_STR)
+extern error_t UMC_kernel_recvmsg(struct socket * sock, struct msghdr * msg,
 			struct kvec * kvec, int num_sg, size_t nbytes,
 			int flags, sstring_t caller_id);
 
@@ -4488,13 +4490,13 @@ extern void genl_rcv(struct sk_buff *skb);
 
 #define UMC_NETLINK_PORT 1234u	/* UDP port for simulated netlink */
 
-extern error_t netlink_xmit(struct sock *sk, struct sk_buff *skb, u32 pid, u32 group, int nonblock);
+extern error_t UMC_netlink_xmit(struct sock *sk, struct sk_buff *skb, u32 pid, u32 group, int nonblock);
 
 #define netlink_unicast(sk, skb, pid, nonblock) \
-    netlink_xmit((sk), (skb), (pid), 0, (nonblock))
+    UMC_netlink_xmit((sk), (skb), (pid), 0, (nonblock))
 
 #define netlink_broadcast(sk, skb, pid, group, flags) \
-    netlink_xmit((sk), (skb), (pid), (group), 0)
+    UMC_netlink_xmit((sk), (skb), (pid), (group), 0)
 
 #define read_pnet(pnet)			    (&init_net)
 #define write_pnet(pnet, x)		    DO_NOTHING()
