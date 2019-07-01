@@ -216,7 +216,7 @@ _find_next_bit(const unsigned long *src, unsigned long nbits, unsigned long star
 /* UMC_kernel.h should be included ahead of any kernel headers except linux/kernel.h */
 #include "UMC_kernel.h"	    /* definitions from some kernel .h files we don't #include */
 
-#include <sys/syscall.h>    /* ends up including a kernel header XXXX */
+#include <sys/syscall.h>    /* ends up including a kernel header XXX */
 
 #include <linux/list.h>
 
@@ -1013,8 +1013,8 @@ static inline void
 rwlock_assert_readlocked(rwlock_t * rw)
 {
 #ifdef UMC_LOCK_CHECKS
-    verify_lt(atomic_read(&rw->count), _RW_LOCK_WR_COUNT, "%s is not locked as expected", rw->name);
-    verify_gt(atomic_read(&rw->count), 0, "%s is WRITE locked during read op", rw->name);
+    expect_lt(atomic_read(&rw->count), _RW_LOCK_WR_COUNT, "%s is not locked as expected", rw->name);
+    expect_gt(atomic_read(&rw->count), 0, "%s is WRITE locked during read op", rw->name);
 #endif
 }
 
@@ -1378,11 +1378,11 @@ struct rcu_head {
 #define rcu_read_unlock()		read_unlock(&UMC_rcu_lock)
 #define _rcu_assert_readlocked()	rwlock_assert_readlocked(&UMC_rcu_lock)
 
-/* These are only supposed to be used under rcu_read_lock(), right? XXX */  //XXXXXX retry assertion
-#define rcu_dereference(ptr)		({ /* XXX _rcu_assert_readlocked(); */ (ptr); })
+/* These are only supposed to be used under rcu_read_lock(), right? XXX */
+#define rcu_dereference(ptr)		({ /* _rcu_assert_readlocked(); */ (ptr); })
 
 #define list_for_each_entry_rcu(p, h, m) /* _rcu_assert_readlocked(); */ \
-					 list_for_each_entry((p), (h), m)   //XXXXXX retry assertion
+					 list_for_each_entry((p), (h), m)
 
 #define rcu_dereference_protected(p, c) ({ assert(c); (p); })
 
@@ -1856,7 +1856,7 @@ _flush_signals(struct task_struct * task, sstring_t caller_id)
  * is the maximum delay between an unwoken event and the thread noticing it.
  * XXX fix so that we can wake them up
  */
-#define WAITQ_CHECK_INTERVAL	sys_time_delta_of_ms(100)   /* signal check interval */
+#define WAITQ_CHECK_INTERVAL	sys_time_delta_of_ms(150)   /* signal check interval */
 
 /* Await a wakeup for a limited time.
  * Called to check if done waiting and/or wait when COND has evaluated false.
@@ -1875,7 +1875,7 @@ _UMC_wait_locked(wait_queue_head_t * wq,
     spin_lock_assert_holding(lockp);
     if (innerlockp)
 	spin_lock_assert_holding(innerlockp);
-    expect_a(t_end + sys_time_delta_of_ms(1), now);
+    // expect_a(t_end + sys_time_delta_of_ms(100), now);	//XXX
     expect_ne(current->state, TASK_RUNNING);
     if (unlikely(!wq->initialized))
 	_init_waitqueue_head(wq);
@@ -2585,14 +2585,12 @@ extern struct workqueue_struct * UMC_workq;
 #define flush_scheduled_work()		flush_workqueue(UMC_workq)
 
 //XXX could do better than this
-//XXXXX locking?
 #define flush_work(WORK) do { \
     if (!list_empty(&(WORK)->entry)) \
 	flush_workqueue((WORK)->wq) \
 } while (0)
 
-//XXXX could do much better than this
-//XXXXX locking?
+//XXXX could do much better than this (cancel_work_sync)
 #define cancel_work_sync(WORK) do { \
     if (!list_empty(&(WORK)->entry)) \
 	flush_workqueue((WORK)->wq) \
@@ -2720,7 +2718,7 @@ _alloc_pages(gfp_t gfp, unsigned int order, sstring_t caller_id)
 #define ClearPageError(page)		DO_NOTHING()
 #define PageReadahead(page)		E_OK
 #define PageSlab(page)			false
-#define PageUptodate(page)		true		//XXXX
+#define PageUptodate(page)		true		//XXX
 
 #define kmap(page)			(page_address(page))
 #define kmap_atomic(page, km_type)	(page_address(page))
@@ -3190,7 +3188,7 @@ blk_mq_rq_to_pdu(struct request *rq)
 #define register_blkdev(major, name)		E_OK
 #define unregister_blkdev(major, name)		DO_NOTHING()
 
-#define blkdev_issue_flush(bdev, xxx)				    (-EPERM)	    //XXXXX
+#define blkdev_issue_flush(bdev, xxx)		fsync_bdev(bdev)    //XXX right?
 #define blkdev_issue_discard(bdev, sector, nr_sects, gfp, flags)    (-EOPNOTSUPP)   //XXXX
 
 #define bd_link_disk_holder(a, b)	E_OK		//XXX sysfs
@@ -3798,7 +3796,7 @@ tcp_sk(struct sock *sk)
 
 #define IPV6_ADDR_LINKLOCAL		0x0020U
 #define IPV6_ADDR_UNICAST		0x0001U
-#define ipv6_addr_type(x)		IPV6_ADDR_UNICAST   //XXXX LINKLOCAL
+#define ipv6_addr_type(x)		IPV6_ADDR_UNICAST   //XXX LINKLOCAL
 
 #define ipv6_addr_equal(x, y)		(!memcmp((x), (y), sizeof(struct in6_addr)))
 

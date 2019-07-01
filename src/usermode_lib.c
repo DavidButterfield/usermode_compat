@@ -820,14 +820,14 @@ restart:
 #ifdef TRACE_socket
 		    sys_notice("%s: recvmsg ignores -EAGAIN on fd=%d flags=0x%x", caller_id, sock->sk->fd, flags);
 #endif
-		    usleep(100);	    //XXXXX
+		    usleep(500);	    //XXXXX
 		    goto restart;   //XXX doesn't adjust time remaining
 		}
 		#define T_SLOP jiffies_to_sys_time(1)
 		if (sys_time_now() < t_end - T_SLOP) {
 		    sys_notice("%s: recvmsg ignores early -EAGAIN on fd=%d now=%lu end=%lu flags=0x%x",
 				caller_id, sock->sk->fd, sys_time_now(), t_end, flags);
-		    usleep(100);	    //XXXXX
+		    usleep(500);	    //XXXXX
 		    goto restart;   //XXX doesn't adjust time remaining
 		}
 #ifdef TRACE_socket
