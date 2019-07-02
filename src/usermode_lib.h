@@ -3830,6 +3830,7 @@ struct socket {
     struct inode	    vfs_inode;
     socket_state	    state;
     unsigned long	    flags;
+    bool		    nonblocking;	/* NONBLOCK setting */
     struct file		  * file;
     struct sock		  * sk;			/* points at embedded sk_s */
     struct socket_ops     * ops;		/* points at embedded ops_s */
@@ -4012,6 +4013,10 @@ sock_create_kern(int family, int type, int protocol, struct socket **newsock)
     }
 
     *newsock = SOCKET_I(file->inode);
+
+    if(type & SOCK_NONBLOCK)
+	(*newsock)->nonblocking = true;
+
     return E_OK;
 }
 

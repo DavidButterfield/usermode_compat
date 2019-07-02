@@ -154,7 +154,7 @@ UMC_alarm_handler(void * const v_timer, uint64_t const now, error_t const err)
     if (unlikely(err != E_OK)) return;
 
     struct timer_list * const timer = v_timer;
-    //XXXXX expect(timer->alarm);   //XXX Bug when alarm goes off quickly
+    //XXXXX expect_ne(timer->alarm, 0);   //XXX Bug when alarm goes off quickly
 
     //XXX A very recent call to mod_timer() may have updated the expire time
     // assert(time_after_eq(now, jiffies_to_sys_time(timer->expires)));
@@ -520,6 +520,9 @@ skb_put(struct sk_buff *skb, unsigned int len)
 
 /******************************************************************************/
 
+#define trace_socket(fmtargs...)	    //	sys_notice(fmtargs)
+#define trace_socket_verbose(fmtargs...)    //	sys_notice(fmtargs)
+
 struct net init_net;
 
 void
@@ -558,11 +561,9 @@ error_t
 UMC_setsockopt(struct socket * sock, int level, int optname, void *optval, socklen_t optlen)
 {
     error_t ret = UMC_kernelize(setsockopt(sock->sk->fd, level, optname, optval, optlen));
-#ifdef TRACE_socket
-    sys_notice("%s (%d) SETSOCKOPT fd=%d level=%d optname=%d optval=0x%x optlen=%d returns %d",
+    trace_socket("%s (%d) SETSOCKOPT fd=%d level=%d optname=%d optval=0x%x optlen=%d returns %d",
 		current->comm, current->pid, sock->sk->fd,
 		level, optname, *(int *)optval, optlen, ret);
-#endif
     return ret;
 }
 
@@ -663,6 +664,7 @@ UMC_sock_accept(struct socket * listener, struct socket ** newsock, int flags)
     struct sockaddr addr;
     socklen_t addrlen = sizeof(struct sockaddr);
     assert(listener->sk->is_listener);
+    expect_eq(flags & ~SOCK_NONBLOCK, 0);   /* other flags untried */
 
     int newfd = UMC_kernelize(accept4(listener->sk->fd, &addr, &addrlen, flags));
     if (newfd < 0) {
@@ -683,6 +685,9 @@ UMC_sock_accept(struct socket * listener, struct socket ** newsock, int flags)
 
     UMC_sock_filladdrs(*newsock);	/* get the local and peer addresses */
     (*newsock)->sk->sk_state = TCP_ESTABLISHED;
+
+    if(flags & SOCK_NONBLOCK)
+	(*newsock)->nonblocking = true;
 
     (*newsock)->sk->sk_state_change = listener->sk->sk_state_change;	//XXX why?
 
@@ -735,7 +740,7 @@ UMC_sock_recvmsg(struct socket * sock, struct msghdr * msg,
 	      size_t nbytes, int flags, sstring_t caller_id)
 {
     ssize_t rc = 123456789;
-#if 1	// DEBUG
+#ifdef DEBUG
     struct iovec * iov = msg->msg_iov;
     int niov = msg->msg_iovlen;
     size_t msgbytes = 0;
@@ -761,10 +766,8 @@ UMC_sock_recvmsg(struct socket * sock, struct msghdr * msg,
 	    sys_warning("%s: fd=%d failed to set receive timeout to jiffies=%lu sec=%lu usec=%lu",
 		caller_id, sock->sk->fd, sock->sk->UMC_rcvtimeo, optval.tv_sec, optval.tv_usec);
 	} else {
-#ifdef TRACE_socket
-	    sys_notice("%s: fd=%d changed receive timeout to jiffies=%lu sec=%lu usec=%lu",
+	    trace_socket("%s: fd=%d changed receive timeout to jiffies=%lu sec=%lu usec=%lu",
 		caller_id, sock->sk->fd, sock->sk->UMC_rcvtimeo, optval.tv_sec, optval.tv_usec);
-#endif
 	}
     }
 #endif
@@ -784,15 +787,14 @@ restart:
      * rv == 0       : "connection shut down by peer"
      */
     if (rc > 0) {
-#ifdef TRACE_socket
 	if ((size_t)rc < nbytes) {
-	    sys_warning("%s: received short read %ld/%lu on fd=%d flags=0x%x",
+	    trace_socket("%s: received short read %ld/%lu on fd=%d flags=0x%x",
 			caller_id, rc, nbytes, sock->sk->fd, flags);
 	} else {
-	    // sys_notice("%s: received full read %ld/%lu on fd=%d flags=0x%x",
-	    //	    caller_id, rc, nbytes, sock->sk->fd, flags);
+	    trace_socket_verbose("%s: received full read %ld/%lu on fd=%d flags=0x%x",
+	        caller_id, rc, nbytes, sock->sk->fd, flags);
 	}
-#endif
+
 	/* Advance the msg by the number of bytes we received into it */
 	size_t skipbytes = (size_t)rc;
 	while (skipbytes && skipbytes >= msg->msg_iov->iov_len) {
@@ -815,11 +817,9 @@ restart:
 	    sys_notice("%s: recvmsg returns -EINTR on fd=%d flags=0x%x",
 			    caller_id, sock->sk->fd, flags);
 	} else if (rc == -EAGAIN) {
-	    if (!(flags & MSG_DONTWAIT)) {  //XXXX probably SO_NONBLOCK too
+	    if (!sock->nonblocking && !(flags & MSG_DONTWAIT)) {
 		if (sock->sk->UMC_rcvtimeo == 0 || sock->sk->UMC_rcvtimeo >= JIFFY_MAX) {
-#ifdef TRACE_socket
-		    sys_notice("%s: recvmsg ignores -EAGAIN on fd=%d flags=0x%x", caller_id, sock->sk->fd, flags);
-#endif
+		    trace_socket("%s: recvmsg ignores -EAGAIN on fd=%d flags=0x%x", caller_id, sock->sk->fd, flags);
 		    usleep(500);	    //XXXXX
 		    goto restart;   //XXX doesn't adjust time remaining
 		}
@@ -830,13 +830,11 @@ restart:
 		    usleep(500);	    //XXXXX
 		    goto restart;   //XXX doesn't adjust time remaining
 		}
-#ifdef TRACE_socket
-		sys_notice("%s: recvmsg returns -EAGAIN on fd=%d timeout=%lu jiffies flags=0x%x",
+		trace_socket("%s: recvmsg returns -EAGAIN on fd=%d timeout=%lu jiffies flags=0x%x",
 			    caller_id, sock->sk->fd, sock->sk->sk_rcvtimeo, flags);
-#endif
 	    } else {
-		// sys_notice("%s: recvmsg(MSG_DONTWAIT) returns -EAGAIN on fd=%d timeout=%lu jiffies flags=0x%x",
-			    // caller_id, sock->sk->fd, sock->sk->sk_rcvtimeo, flags);
+		trace_socket_verbose("%s: recvmsg(MSG_DONTWAIT) returns -EAGAIN on fd=%d timeout=%lu jiffies flags=0x%x",
+			    caller_id, sock->sk->fd, sock->sk->sk_rcvtimeo, flags);
 	    }
 	} else {
 	    sys_warning("%s: ERROR %"PRId64" '%s'on fd=%d flags=0x%x", caller_id,
@@ -938,8 +936,8 @@ UMC_netlink_xmit(struct sock *sk, struct sk_buff *skb, uint32_t pid, uint32_t gr
 
     if (group) {
 	if (group < 32) {
-	    dst_addr.sin_addr.s_addr = htonl(224<<24 | 0<<16 | 0<<8 | group);	//XXXXXX
-	    dst_addr.sin_port = 7789;						//XXXXXX
+	    dst_addr.sin_addr.s_addr = htonl(224u<<24 | 0u<<16 | 0u<<8 | group);    //XXXXXX
+	    dst_addr.sin_port = 7789;						    //XXXXXX
 	} else
 	    sys_warning("multicast group=%d out of range [1-31]", group);
     }
