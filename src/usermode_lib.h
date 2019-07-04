@@ -455,8 +455,10 @@ strnchr(string_t str, size_t strmax, int match)
 
 /*** Modules ***/
 
-extern struct module __this_module;
-#define THIS_MODULE (&__this_module)
+#ifndef THIS_MODULE
+extern struct module UMC_module;
+#define THIS_MODULE (&UMC_module)
+#endif
 
 /* Externally-visible entry points for module init/exit functions */
 #define module_init(fn)		 extern error_t _CONCAT(UMC_INIT_, fn)(void); \
@@ -481,21 +483,20 @@ extern struct module __this_module;
 
 #define MODULE_NAME_LEN			56
 struct modversion_info { unsigned long crc; char name[MODULE_NAME_LEN]; };
-struct module { char name[MODULE_NAME_LEN]; int arch; string_t version; };
+struct module { char name[MODULE_NAME_LEN]; string_t version; };
 
 #define module_param_string(h1, h2, size_h2, mode)  /* */
 #define MODULE_ALIAS_BLOCKDEV_MAJOR(major)	    /* */
 
 #define MODULE_INFO(ver, str)		/* */
 #define MODULE_PARM_DESC(var, desc)	/* */
-#define MODULE_ARCH_INIT		0xED0CBAD0  /*  DAB's "usermode arch" */
 
 #define get_module_info(arg)		(-EINVAL)
 #define try_module_get(module)		true
 #define request_module(a, b)		DO_NOTHING()
 #define module_put(module)		DO_NOTHING()
 
-extern error_t UMC_init(char *);	/* usermode_lib.c */
+extern error_t UMC_init(const char *);	/* usermode_lib.c */
 extern error_t UMC_exit(void);
 
 typedef struct kernel_cap_struct { } kernel_cap_t;
@@ -1303,6 +1304,8 @@ mutex_is_locked(mutex_t * m)
 #define trace_sema(fmtargs...)	//	sys_notice(fmtargs)
 struct semaphore {
     sem_t				UM_sem;
+    sys_thread_t			volatile owner;
+    sstring_t				last_locker;
 };
 
 static inline error_t
@@ -1315,6 +1318,7 @@ sema_init(struct semaphore * sem, unsigned int val)
 static inline error_t
 UMC_up(struct semaphore * sem, sstring_t whence)
 {
+    sem->owner = NULL;
     error_t err = UMC_kernelize(sem_post(&sem->UM_sem));
     trace_sema("%s: ++++++++++ UP(%p)-->%d err=%d", whence, sem, *(int *)sem, err);
     return err;
@@ -1327,6 +1331,8 @@ UMC_down(struct semaphore * sem, sstring_t whence)
     trace_sema("%s: ========== DOWN(%p) %d-->...", whence, sem, *(int *)sem);
     error_t err = UMC_kernelize(sem_wait(&sem->UM_sem));
     trace_sema("%s: ---------- DOWN(%p)-->%d err=%d", whence, sem, *(int *)sem, err);
+    sem->owner = sys_thread_current();
+    sem->last_locker = whence;
     return err;
 }
 
@@ -1337,6 +1343,8 @@ UMC_down_trylock(struct semaphore * sem, sstring_t whence)
     error_t err = UMC_kernelize(sem_trywait(&sem->UM_sem));
     if (err == E_OK) {
 	trace_sema("%s: ---------- DOWN_TRY(%p)-->%d err=%d", whence, sem, *(int *)sem, err);
+	sem->owner = sys_thread_current();
+	sem->last_locker = whence;
     } else {
 	trace_sema("%s: xxxxxxxxxx DOWN_TRY(%p)==%d err=%d", whence, sem, *(int *)sem, err);
     }
@@ -3105,12 +3113,6 @@ sync_page_range(struct inode * inode, void * mapping, loff_t offset, loff_t nbyt
 
 /*** Device ***/
 
-#define MINORBITS       20
-#define MINORMASK       ((1U << MINORBITS) - 1)
-
-#define MAJOR(dev)      ((unsigned int) ((dev) >> MINORBITS))
-#define MINOR(dev)      ((unsigned int) ((dev) & MINORMASK))
-
 struct device {
     struct kobject	        kobj;
     dev_t			devt;
@@ -3270,6 +3272,9 @@ struct block_device_operations {
 };
 
 /*** gendisk ***/
+
+extern struct proc_dir_entry * UMC_fuse_dev_add(const char * name, dev_t, umode_t);
+extern error_t UMC_fuse_dev_remove(const char * name);
 
 struct hd_struct {
     unsigned long			nr_sects;
@@ -3442,6 +3447,8 @@ alloc_disk(int nminors)
 static inline void
 del_gendisk(struct gendisk * disk)
 {
+    UMC_fuse_dev_remove(disk->disk_name);
+
     spin_lock(&UMC_disk_list_lock);
     list_del(&disk->disk_list);		/* remove from UMC_disk_list */
     spin_unlock(&UMC_disk_list_lock);
@@ -3460,6 +3467,9 @@ add_disk(struct gendisk * disk)
     spin_unlock(&UMC_disk_list_lock);
     // register_disk(NULL, disk);
     // blk_register_queue(disk);
+
+    umode_t mode = S_IFBLK | (disk->part0.policy ? 0440 : 0660);
+    UMC_fuse_dev_add(disk->disk_name, devt, mode);
 }
 
 #define set_capacity(disk, nsectors)	((disk)->part0.nr_sects = (nsectors))
@@ -4246,7 +4256,9 @@ struct proc_dir_entry {
     struct module		      * owner;	    /* still in 2.6.24 */
     const struct file_operations      *	proc_fops;
     void			      * data;
+    size_t				size;
     umode_t				mode;
+    dev_t				devt;
     time_t				atime;
     time_t				mtime;
     u8					namelen;
@@ -4257,7 +4269,10 @@ struct proc_dir_entry {
 extern struct proc_dir_entry * pde_create(char const *, umode_t, struct proc_dir_entry *,
 						const struct file_operations *, void *);
 
-extern struct proc_dir_entry * pde_remove(char const * name, struct proc_dir_entry * parent);
+extern error_t pde_remove(char const * name, struct proc_dir_entry * parent);
+
+extern struct proc_dir_entry * UMC_fuse_module_mkdir(char * modname);
+extern error_t UMC_fuse_module_rmdir(char * modname);
 
 #define proc_create_data(name, mode, parent, fops, data) \
 	    pde_create((name), (mode), (parent), (fops), (data))
@@ -4276,16 +4291,15 @@ extern struct proc_dir_entry * pde_remove(char const * name, struct proc_dir_ent
 #define PROC_FILE_UMODE_R		(S_IFREG | 0444)
 #define PROC_FILE_UMODE_RW		(S_IFREG | 0664)
 
-#define remove_proc_entry(name, parent) \
-	    do { struct proc_dir_entry * pde = pde_remove(name, (parent)); \
-		 if (pde) vfree(pde); \
-	    } while (0)
+#define remove_proc_entry(name, parent) pde_remove(name, (parent))
 
-/* This hack is for accessing "module_param_named" variables */
+/* These are for accessing "module_param_named" variables */
 //XXX You can write them, but unless someone then notices the changed value, nothing happens
 
-struct proc_dir_entry * pde_module_param_create(char const *, void *, size_t, umode_t);
-struct proc_dir_entry * pde_module_param_remove(char const * name);
+extern struct proc_dir_entry * UMC_module_param_create(char const *, void *, size_t,
+						umode_t, struct module *);
+
+extern error_t UMC_module_param_remove(char const * name, struct module *);
 
 /* Each instance in the source of module_param_named() here defines two functions to add and
  * remove a reference to the named variable in the PDE tree.  The functions are called from
@@ -4296,21 +4310,21 @@ struct proc_dir_entry * pde_module_param_remove(char const * name);
 	void CONCAT(UMC_param_create_, procname)(void)  \
 	{ \
 	    assert_eq(sizeof(vartype), sizeof(varname)); \
-	    pde_module_param_create(#procname, &varname, sizeof(varname), (modeperms)); \
+	    UMC_module_param_create(#procname, &varname, sizeof(varname), \
+				    (modeperms), THIS_MODULE); \
 	} \
  \
  extern void CONCAT(UMC_param_remove_, procname)(void); \
 	void CONCAT(UMC_param_remove_, procname)(void)  \
 	{ \
 	    assert_eq(sizeof(vartype), sizeof(varname)); \
-	    struct proc_dir_entry * pde = pde_module_param_remove(#procname); \
-	    if (pde) vfree(pde); \
+	    UMC_module_param_remove(#procname, THIS_MODULE); \
 	}
 
 #define module_param(var, type, mode)	module_param_named(var, var, type, (mode))
 
 /* Start/control the FUSE thread */
-extern error_t UMC_fuse_start(char * mountpoint);
+extern error_t UMC_fuse_start(const char * mountpoint);
 extern error_t UMC_fuse_stop(void);
 extern error_t UMC_fuse_exit(void);
 

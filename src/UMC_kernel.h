@@ -23,10 +23,12 @@
 	__rem;					\
 })
 
-/*** linux/kdev_t.h ***/
+/*** linux/kdev_t.h (modified to usermode convention) ***/
 
-#define MINORBITS			20
+#define MINORBITS			8 // 20 in real kernel
 #define MINORMASK			((1U << MINORBITS) - 1)
+#define MAJOR(dev)      ((unsigned int) ((dev) >> MINORBITS))
+#define MINOR(dev)      ((unsigned int) ((dev) & MINORMASK))
 #define MKDEV(major, minor)		(((major) << MINORBITS) | (minor))
 
 /*** linux/time.h ***/

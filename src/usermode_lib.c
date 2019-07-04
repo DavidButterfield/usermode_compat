@@ -13,6 +13,8 @@
 #define  NO_UMC_SOCKETS		// inhibit usermode_lib ucred for one in sys/socket.h
 #include "usermode_lib.h"	// must be after sys/socket.h, when NO_UMC_SOCKETS
 
+struct module UMC_module;
+
 extern _PER_THREAD char sys_pthread_name[16];
 
 _PER_THREAD struct task_struct * current;   /* current task (thread) structure */
@@ -1236,7 +1238,7 @@ signal_pending(struct task_struct * task)
 /* Initialize the usermode_lib usermode compatibility module */
 /* mountname is the path to the procfs or sysfs mount point */
 error_t
-UMC_init(char * mountname)
+UMC_init(const char * mountname)
 {
     sys_tz.tz_minuteswest = timezone/60;    /* see tzset(3) */
     sys_tz.tz_dsttime = daylight;	    /* see tzset(3) */
