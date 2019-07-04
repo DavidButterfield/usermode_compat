@@ -2924,6 +2924,10 @@ struct inode {
     struct block_device	      * i_bdev;		/* when I_TYPE_BDEV */
     dev_t			i_rdev;		/* device major/minor */
 
+    time_t			i_atime;
+    time_t			i_mtime;
+//  time_t			i_ctime;
+
     /* unused */
 //  unsigned long		i_ino;
 //  unsigned int		i_nlink;
@@ -2942,7 +2946,7 @@ struct inode {
     record_zero(inode); \
     (inode)->UMC_type = (type); \
     (inode)->UMC_fd = (fd); \
-    atomic_set(&(inode->i_count), 1); \
+    atomic_set(&((inode)->i_count), 1); \
     (inode)->i_mode = (mode); \
     (inode)->i_size = (size); \
     (inode)->i_flags = (oflags); \
@@ -3273,9 +3277,6 @@ struct block_device_operations {
 
 /*** gendisk ***/
 
-extern struct proc_dir_entry * UMC_fuse_dev_add(const char * name, dev_t, umode_t);
-extern error_t UMC_fuse_dev_remove(const char * name);
-
 struct hd_struct {
     unsigned long			nr_sects;
     unsigned int			policy;
@@ -3443,6 +3444,10 @@ alloc_disk(int nminors)
 }
 
 #define put_disk(disk)			kobject_put(&disk_to_dev(disk)->kobj)
+
+/* Add a device entry in /UMCfuse/dev */
+extern struct proc_dir_entry * UMC_fuse_dev_add(const char * name, dev_t, umode_t);
+extern error_t UMC_fuse_dev_remove(const char * name);
 
 static inline void
 del_gendisk(struct gendisk * disk)
@@ -4082,18 +4087,6 @@ fput(struct file * sockfile)
 
 /*** seq ops for /proc and /sys ***/
 
-struct proc_inode {
-    struct kobject * kobj;		/* 2.6.26 */	//XXXXX
-    struct proc_dir_entry * pde;	/* 2.6.24 */
-    struct inode			vfs_inode;
-};
-
-#define PROC_I(inode)			({ assert_eq((inode)->UMC_type, I_TYPE_PROC); \
-					   container_of(inode, struct proc_inode, vfs_inode); \
-					})
-
-#define PDE(inode)			(PROC_I(inode)->pde)
-
 /* PROCFS */
 
 #define seq_lseek			NULL	/* unused */
@@ -4172,6 +4165,7 @@ single_release(struct inode * inode, struct file * file)
     return rc;
 }
 
+/* Return pointer to list position pos from head */
 static inline struct list_head *
 seq_list_start(struct list_head *head, loff_t pos)
 {
@@ -4184,6 +4178,9 @@ seq_list_start(struct list_head *head, loff_t pos)
     return NULL;	/* not found */
 }
 
+/* Return pointer to next position on list from v, or NULL at end of list.
+ * Also update the list position index *ppos.
+ */
 static inline struct list_head *
 seq_list_next(void *v, struct list_head *head, loff_t *ppos)
 {
@@ -4211,7 +4208,7 @@ seq_fmt(struct seq_file * seq)
 
     while (list_item) {
 	error_t rc = seq->op->show(seq, list_item);
-	assert_eq(rc, E_OK);
+	expect_eq(rc, E_OK);
 	list_item = seq->op->next(seq, list_item, &pos);
     }
 
@@ -4248,7 +4245,7 @@ seq_read(struct file * file, void * buf, size_t size, loff_t * lofsp)
 
 /* /proc and/or /sys simulated by mapping our proc_dir_entry tree to the FUSE filesystem API */
 
-/* Internal representation of (simulated) /proc tree */
+/* Internal representation of fuse filesystem, including (simulated) /proc tree */
 struct proc_dir_entry {
     struct proc_dir_entry	      * parent;	    /* root's parent is NULL */
     struct proc_dir_entry	      * sibling;    /* null terminated list */
@@ -4256,26 +4253,23 @@ struct proc_dir_entry {
     struct module		      * owner;	    /* still in 2.6.24 */
     const struct file_operations      *	proc_fops;
     void			      * data;
-    size_t				size;
-    umode_t				mode;
-    dev_t				devt;
-    time_t				atime;
-    time_t				mtime;
+    umode_t				mode;	    //XXX same as inode->i_mode
     u8					namelen;
     char				name[1];    /* space for '\0' */
 };
 
-/* Application calls here to create/update PDE tree -- a NULL parent refers to the root node */
-extern struct proc_dir_entry * pde_create(char const *, umode_t, struct proc_dir_entry *,
+#define PROC_ROOT_UMODE			(S_IFDIR | 0555)
+#define PROC_DIR_UMODE			(S_IFDIR | 0555)
+#define PROC_FILE_UMODE_R		(S_IFREG | 0444)
+#define PROC_FILE_UMODE_RW		(S_IFREG | 0664)
+
+/* Application calls here to create /proc PDE tree -- NULL parent refers to the /proc node */
+extern struct proc_dir_entry * UMC_pde_create(char const *, umode_t, struct proc_dir_entry *,
 						const struct file_operations *, void *);
-
-extern error_t pde_remove(char const * name, struct proc_dir_entry * parent);
-
-extern struct proc_dir_entry * UMC_fuse_module_mkdir(char * modname);
-extern error_t UMC_fuse_module_rmdir(char * modname);
+extern error_t UMC_pde_remove(char const * name, struct proc_dir_entry * parent);
 
 #define proc_create_data(name, mode, parent, fops, data) \
-	    pde_create((name), (mode), (parent), (fops), (data))
+		UMC_pde_create((name), (mode), (parent), (fops), (data))
 
 #define proc_create(name, mode, parent, fops) \
 		proc_create_data((name), (mode), (parent), (fops), NULL)
@@ -4283,15 +4277,14 @@ extern error_t UMC_fuse_module_rmdir(char * modname);
 #define create_proc_entry(name, mode, parent) \
 		proc_create_data((name), (mode), (parent), NULL, NULL)
 
+/* Called by *_compat.c init/exit function to create /sys/module/THIS_MODULE->name/parameters */
+extern struct proc_dir_entry * UMC_fuse_module_mkdir(char * modname);
+extern error_t UMC_fuse_module_rmdir(char * modname);
+
 #define proc_mkdir(name, parent)	    \
 		proc_create_data((name), PROC_DIR_UMODE, (parent), NULL, NULL)
 
-#define PROC_ROOT_UMODE			(S_IFDIR | 0555)
-#define PROC_DIR_UMODE			(S_IFDIR | 0555)
-#define PROC_FILE_UMODE_R		(S_IFREG | 0444)
-#define PROC_FILE_UMODE_RW		(S_IFREG | 0664)
-
-#define remove_proc_entry(name, parent) pde_remove(name, (parent))
+#define remove_proc_entry(name, parent) UMC_pde_remove((name), (parent))
 
 /* These are for accessing "module_param_named" variables */
 //XXX You can write them, but unless someone then notices the changed value, nothing happens
@@ -4327,6 +4320,21 @@ extern error_t UMC_module_param_remove(char const * name, struct module *);
 extern error_t UMC_fuse_start(const char * mountpoint);
 extern error_t UMC_fuse_stop(void);
 extern error_t UMC_fuse_exit(void);
+
+struct proc_inode {
+    struct kobject kobj;		/* 2.6.26 */	//XXXXX
+    struct proc_dir_entry * pde;	/* 2.6.24 */
+    struct inode			vfs_inode;
+    struct proc_dir_entry pde_s;
+};
+
+#define PROC_I(inode)			({ assert_eq((inode)->UMC_type, I_TYPE_PROC); \
+					   container_of(inode, struct proc_inode, vfs_inode); \
+					})
+
+#define pde_inode(pde)			(&container_of((pde), struct proc_inode, pde_s)->vfs_inode)
+#define inode_pde(inode)		(PROC_I(inode)->pde)
+#define PDE(inode)			inode_pde(inode)
 
 /*** iput ***/
 

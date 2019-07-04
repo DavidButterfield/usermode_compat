@@ -27,7 +27,7 @@
 
 static volatile sys_thread_t UMC_FUSE_THREAD;	/* thread runs fuse loop */
 static DEFINE_MUTEX(UMC_fuse_lock);		//XXX nasty big lock could be fixed
-static const char * mount_point;
+static const char * UMC_fuse_mount_point;
 
 static struct proc_dir_entry * UMC_PDE_ROOT;    //XXX limitation: single instance
 static struct proc_dir_entry * UMC_PDE_PROC;	/* /proc */
@@ -76,12 +76,15 @@ UMCfuse_node_create(char const * name, umode_t mode,
     assert(!strchr(name, '/'), "'%s'", name);
 
     /* extra space for the name string -- the terminating NUL is already counted */
-    struct proc_dir_entry * pde = vzalloc(sizeof(*pde) + namelen);
+    struct proc_inode * pi = vzalloc(sizeof(*pi) + namelen);
+    pi->pde = &pi->pde_s;
+    struct proc_dir_entry * pde = pi->pde;
+    init_inode(&pi->vfs_inode, I_TYPE_PROC, mode, 0, 0, -1);
     memcpy(pde->name, name, namelen);
     pde->namelen = namelen;
     pde->proc_fops = fops;
     pde->data = data;
-    pde->mtime = pde->atime = time(NULL);
+    pde_inode(pde)->i_mtime = pde_inode(pde)->i_atime = time(NULL);
 
     pde->mode = mode;
     if ((pde->mode & S_IFMT) == 0) {
@@ -153,7 +156,8 @@ UMCfuse_node_destroy(struct proc_dir_entry * pde)
 	vfree(pde_str);
 	return -EBUSY;
     }
-    vfree(pde);
+    //XXXXX should do this via iput
+    vfree(container_of(pde, struct proc_inode, pde_s));
     return E_OK;
 }
 
@@ -162,15 +166,8 @@ static ssize_t
 UMCpde_node_read(struct proc_dir_entry * pde, char * buf, size_t size, off_t * ofs)
 {
     error_t err;
-    struct proc_inode *pi = record_alloc(pi);
     struct file * file = record_alloc(file);
-
-    file->inode = &pi->vfs_inode;
-    init_inode(file->inode, I_TYPE_PROC, pde->mode, 0, 0, -1);
-
-    struct proc_inode * pi_check = PROC_I(file->inode);
-    assert_eq(pi_check, pi);
-    pi->pde = pde;
+    file->inode = pde_inode(pde);
 
     err = pde->proc_fops->open(file->inode, file);
     expect_noerr(err, "pde[%s]->proc_fops->open", pde->name);
@@ -184,7 +181,6 @@ UMCpde_node_read(struct proc_dir_entry * pde, char * buf, size_t size, off_t * o
     expect_noerr(err, "pde[%s]->proc_fops->release", pde->name);
 
     record_free(file);
-    record_free(pi);
 
     return bytes_read;
 }
@@ -194,15 +190,8 @@ static ssize_t
 UMCpde_node_write(struct proc_dir_entry * pde, char const * buf, size_t size, off_t * ofs)
 {
     error_t err;
-    struct proc_inode *pi = record_alloc(pi);
     struct file * file = record_alloc(file);
-
-    file->inode = &pi->vfs_inode;
-    init_inode(file->inode, I_TYPE_PROC, pde->mode, 0, 0, -1);
-
-    struct proc_inode * pi_check = PROC_I(file->inode);
-    assert_eq(pi_check, pi);
-    pi->pde = pde;
+    file->inode = pde_inode(pde);
 
     err = pde->proc_fops->open(file->inode, file);
     expect_noerr(err, "pde[%s]->proc_fops->open", pde->name);
@@ -220,7 +209,6 @@ UMCpde_node_write(struct proc_dir_entry * pde, char const * buf, size_t size, of
     expect_noerr(err, "pde[%s]->proc_fops->release", pde->name);
 
     record_free(file);
-    record_free(pi);
 
     return bytes_written;
 }
@@ -281,31 +269,29 @@ UMCfuse_lookup(struct proc_dir_entry * pde_root, sstring_t path)
     UMCfuse_node_check(pde_root);
     assert(S_ISDIR(pde_root->mode));
 
-    uint32_t path_ofs = 0;	/* offset of start of pathname segment in path */
-    while (path[path_ofs] == '/') path_ofs++;	    /* skip '/' sequence */
-    if (path[path_ofs] == '\0') {
-	return pde_root;	/* path string ends at this node */
+    while (*path == '/')
+	path++;		    /* skip initial '/' sequence */
+    if (*path == '\0') {
+	return pde_root;    /* path string ended at this node */
     }
 
-    uint32_t name_ofs;		/* offset into pde's name string */
+    uint32_t name_ofs;	    /* offset into pde's name string */
     foreach_pde_child(pde_root, pde) {
 	UMCfuse_node_check(pde);
-	for (name_ofs = 0 ; path[path_ofs + name_ofs] == pde->name[name_ofs]; name_ofs++) {
+	for (name_ofs = 0 ; path[name_ofs] == pde->name[name_ofs]; name_ofs++)
 	    if (pde->name[name_ofs] == '\0') break;	/* end of matching strings */
-	}
 
 	if (pde->name[name_ofs] != '\0') continue;	/* mismatch -- try the next sibling */
 
-	if (path[path_ofs + name_ofs] != '\0' && path[path_ofs + name_ofs] != '/')
+	if (path[name_ofs] != '\0' && path[name_ofs] != '/')
 	    continue;					/* mismatch -- node name was shorter */
 
 	/* Found an entry matching this path segment */
-	if (path[path_ofs + name_ofs] == '\0') {
+	if (path[name_ofs] == '\0')
 	    return pde;		    /* this was the last path segment */
-	}
 
 	/* Descend (recursion) to lookup the next path segment with pde as root */
-	return UMCfuse_lookup(pde, path + path_ofs + name_ofs);
+	return UMCfuse_lookup(pde, path + name_ofs);
     }
 
     WARN_ONCE(true, "UMCfuse_lookup failed to find %s under %s", path, pde_root->name);
@@ -319,6 +305,7 @@ UMCfuse_getattr(struct proc_dir_entry * pde_root, sstring_t path, struct stat * 
     trace_verbose("%s", path);
     struct proc_dir_entry * pde = UMCfuse_lookup(pde_root, path);
     if (!pde) return -ENOENT;
+    struct inode * inode = pde_inode(pde);
 
     assert(S_ISREG(pde->mode) || S_ISDIR(pde->mode) || S_ISBLK(pde->mode));
 
@@ -328,17 +315,14 @@ UMCfuse_getattr(struct proc_dir_entry * pde_root, sstring_t path, struct stat * 
     if (S_ISDIR(pde->mode))
 	st->st_nlink += 2;	    /* . and .. */
 #endif
-    st->st_size = pde->size;
     st->st_uid = 0;		    /* root */
-    st->st_atime = pde->atime;
-    st->st_mtime = pde->mtime;
-    st->st_rdev = pde->devt;	    // device that this node represents
+    st->st_size = inode->i_size;
+    st->st_atime = inode->i_atime;
+    st->st_mtime = inode->i_mtime;
+    st->st_rdev = inode->i_rdev;
 
-    st->st_blksize = 4096;	    //XXX "preferred" block size
     // st->st_blocks		    // blocks allocated
     // st->st_ctime
-    // st->st_dev		    // the device on which this file resides
-    // st->st_ino		    // inode number
 
     /* Hack: allow users in program's group the same write access as owner */
     /* If the program's gid is zero, allow access to the adm group */
@@ -356,9 +340,10 @@ UMCfuse_readdir(struct proc_dir_entry * pde_root, char const * path,
 {
     trace_verbose("%s ofs=%"PRIu64, path, ofs);
     struct proc_dir_entry * pde = UMCfuse_lookup(pde_root, path);
-    if (!pde) return -ENOENT;
-    if (!S_ISDIR(pde->mode)) return -ENOTDIR;
-    pde->atime = time(NULL);
+    if (!pde)
+	return -ENOENT;
+    assert(S_ISDIR(pde->mode));
+    pde_inode(pde)->i_atime = time(NULL);
 #ifdef DOT_AND_DOT_DOT
 #error needs implementing
 #endif
@@ -386,9 +371,11 @@ UMCfuse_read(struct proc_dir_entry * pde_root, char const * path,
     struct proc_dir_entry * pde = UMCfuse_lookup(pde_root, path);
     if (!pde)
 	return -ENOENT;
-    if (S_ISDIR(pde->mode))
-	return -EISDIR;
+    assert(!S_ISDIR(pde->mode));
     assert(pde->proc_fops);
+
+    if (!pde->proc_fops->read)
+	return -EPERM;
 
     ssize_t ret;
     if (S_ISBLK(pde->mode)) {
@@ -398,7 +385,7 @@ UMCfuse_read(struct proc_dir_entry * pde_root, char const * path,
 	ret = UMCpde_node_read(pde, buf, size, &ofs);	//XXXXX check &ofs
     }
 
-    pde->atime = time(NULL);
+    pde_inode(pde)->i_atime = time(NULL);
     trace_verbose("READ %s REPLY len=%"PRIu64" '%.*s'", path, ret, (uint32_t)ret, buf);
     return ret;
 }
@@ -412,8 +399,7 @@ UMCfuse_write(struct proc_dir_entry * pde_root, char const * path,
     struct proc_dir_entry * pde = UMCfuse_lookup(pde_root, path);
     if (!pde)
 	return -ENOENT;
-    if (S_ISDIR(pde->mode))
-	return -EISDIR;
+    assert(!S_ISDIR(pde->mode));
     assert(pde->proc_fops);
 
     /* These nodes aren't supposed to be writable, but superuser can still get here */
@@ -427,7 +413,7 @@ UMCfuse_write(struct proc_dir_entry * pde_root, char const * path,
 	ret = UMCpde_node_write(pde, buf, size, &ofs);	//XXXXX check &ofs
     }
 
-    pde->mtime = time(NULL);
+    pde_inode(pde)->i_mtime = time(NULL);
     trace_verbose("WRITE %s REPLY len=%"PRIu64" '%.*s'", path, ret, (uint32_t)ret, buf);
     return ret;
 }
@@ -454,7 +440,7 @@ UMC_fuse_readdir(char const * path, void * buf,
     return err;
 }
 
-static int
+static error_t
 UMC_fuse_open(char const * path, struct fuse_file_info * fi)
 {
     trace_verbose("%s", path);
@@ -488,15 +474,29 @@ UMC_fuse_write(char const * path, char const * buf, size_t size, off_t ofs, stru
     mutex_lock(&UMC_fuse_lock);
     ssize_t ret = UMCfuse_write(UMC_PDE_ROOT, path, buf, size, ofs);
     mutex_unlock(&UMC_fuse_lock);
+
     return ret;
 }
 
+// fuse_file_info
+//	int flags;		    /* Open flags.  Available in open() and release() */
+//	int writepage;		    /* In case of a write operation indicates if this was caused by a writepage */
+//	unsigned int flush:1;	    /* Indicates a flush operation.  Set in flush operation */
+//	unsigned int direct_io:1;   /* Can be filled in by open, to use direct I/O on this file. */
+//	unsigned int nonseekable:1; /* Can be filled in by open, to indicate that the file is not seekable. */
+//	uint64_t fh;		    /* May be filled in by open.  Available in all other file operations */
+
 static struct fuse_operations const pde_ops = {
     .getattr	= UMC_fuse_getattr,
-    .readdir	= UMC_fuse_readdir,
     .open	= UMC_fuse_open,
-    .read	= UMC_fuse_read,
-    .write	= UMC_fuse_write,
+    //int (*release) (const char *, struct fuse_file_info *);	one per open
+    // .release	= UMC_fuse_release,	// flag_nopath
+    .read	= UMC_fuse_read,	// flag_nopath
+    .write	= UMC_fuse_write,	// flag_nopath
+    // int (*fsync) (const char *, int, struct fuse_file_info *);
+    // .fsync	= UMC_fuse_fsync,	// flag_nopath
+    .readdir	= UMC_fuse_readdir,	// flag_nopath
+    .flag_nopath = false,
 };
 
 /******************************************************************************/
@@ -516,7 +516,7 @@ UMC_fuse_run(void * unused)
 
     char /*const*/ * UMC_fuse_argv[] = {
 	"fuse_main",		    /* argv[0] */
-	_unconstify(mount_point),
+	_unconstify(UMC_fuse_mount_point),
 
 	//"--help",
 	//"--version",
@@ -565,7 +565,7 @@ UMC_fuse_start(const char * mountpoint)
     assert(!UMC_PDE_ROOT);
     assert(mountpoint);
 
-    mount_point = mountpoint;
+    UMC_fuse_mount_point = mountpoint;
 
     //XXXX should strrchr('/') this or treat root name special ?
     while (*mountpoint == '/')
@@ -575,19 +575,20 @@ UMC_fuse_start(const char * mountpoint)
     }
     UMC_PDE_ROOT = UMCfuse_node_create(mountpoint, PROC_ROOT_UMODE, NULL, NULL);
 
-    UMC_PDE_PROC = pde_create("proc", PROC_DIR_UMODE, UMC_PDE_ROOT, NULL, NULL);
-    UMC_PDE_DEV = pde_create("dev", PROC_DIR_UMODE, UMC_PDE_ROOT, NULL, NULL);
-    UMC_PDE_SYS = pde_create("sys", PROC_DIR_UMODE, UMC_PDE_ROOT, NULL, NULL);
-    UMC_PDE_MOD = pde_create("module", PROC_DIR_UMODE, UMC_PDE_SYS, NULL, NULL);
+    UMC_PDE_PROC = UMC_pde_create("proc", PROC_DIR_UMODE, UMC_PDE_ROOT, NULL, NULL);
+    UMC_PDE_DEV = UMC_pde_create("dev", PROC_DIR_UMODE, UMC_PDE_ROOT, NULL, NULL);
+    UMC_PDE_SYS = UMC_pde_create("sys", PROC_DIR_UMODE, UMC_PDE_ROOT, NULL, NULL);
+    UMC_PDE_MOD = UMC_pde_create("module", PROC_DIR_UMODE, UMC_PDE_SYS, NULL, NULL);
 
     /* Create the mount point for the fuse filesystem */
     string_t cmd = kasprintf(IGNORED, "/bin/mkdir -p %s; chmod 777 %s",
-			       mount_point, mount_point);
+			       UMC_fuse_mount_point, UMC_fuse_mount_point);
     int rc = system(cmd);
     expect_noerr(rc, "system(\"%s\")", cmd);
     kfree(cmd);
 
-    sys_notice("created %s fuse root @%p -- starting fuse service", mount_point, UMC_PDE_ROOT);
+    sys_notice("created %s fuse root @%p -- starting fuse service",
+		UMC_fuse_mount_point, UMC_PDE_ROOT);
 
     UMC_FUSE_THREAD = sys_thread_alloc(UMC_fuse_run, NULL, kstrdup("UMC_fuse", IGNORED));
 
@@ -612,10 +613,10 @@ UMC_fuse_exit(void)
 	return -EBUSY;
     }
 
-    pde_remove("module", UMC_PDE_SYS); UMC_PDE_MOD = NULL;
-    pde_remove("sys", UMC_PDE_ROOT); UMC_PDE_SYS = NULL;
-    pde_remove("dev", UMC_PDE_ROOT); UMC_PDE_DEV = NULL;
-    pde_remove("proc", UMC_PDE_ROOT); UMC_PDE_PROC = NULL;
+    UMC_pde_remove("module", UMC_PDE_SYS); UMC_PDE_MOD = NULL;
+    UMC_pde_remove("sys", UMC_PDE_ROOT); UMC_PDE_SYS = NULL;
+    UMC_pde_remove("dev", UMC_PDE_ROOT); UMC_PDE_DEV = NULL;
+    UMC_pde_remove("proc", UMC_PDE_ROOT); UMC_PDE_PROC = NULL;
 
     UMCfuse_node_destroy(UMC_PDE_ROOT); UMC_PDE_ROOT = NULL;
 
@@ -654,7 +655,7 @@ UMC_fuse_stop(void)
 
 /* Add an entry to the tree directly under parent -- attaches to UMC_PDE_PROC if parent is NULL */
 struct proc_dir_entry *
-pde_create(char const * name, umode_t mode, struct proc_dir_entry * parent,
+UMC_pde_create(char const * name, umode_t mode, struct proc_dir_entry * parent,
 				    struct file_operations const * fops, void * data)
 {
     if (!parent)
@@ -669,7 +670,7 @@ pde_create(char const * name, umode_t mode, struct proc_dir_entry * parent,
 
 /* Remove and destroy an entry from directly under parent */
 error_t
-pde_remove(char const * name, struct proc_dir_entry * parent)
+UMC_pde_remove(char const * name, struct proc_dir_entry * parent)
 {
     if (!parent)
 	parent = UMC_PDE_PROC;
@@ -687,53 +688,7 @@ pde_remove(char const * name, struct proc_dir_entry * parent)
     return E_OK;
 }
 
-#if 0
-/* Lookup an entry */
-struct proc_dir_entry *
-pde_lookup(char const * name, struct proc_dir_entry * parent)
-{
-    if (!parent)
-	parent = UMC_PDE_ROOT;
-
-    mutex_lock(&UMC_fuse_lock);
-    //XXX hold?
-    struct proc_dir_entry * pde = UMCfuse_lookup(parent, path);
-    mutex_unlock(&UMC_fuse_lock);
-
-    return node;
-}
-#endif
-
-struct proc_dir_entry *
-UMC_fuse_module_mkdir(char * modname)
-{
-    struct proc_dir_entry * pde_parent = UMC_PDE_ROOT;
-    pde_parent = UMCfuse_lookup(pde_parent, "sys");
-    assert(pde_parent);
-    pde_parent = UMCfuse_lookup(pde_parent, "module");
-    assert(pde_parent);
-    pde_parent = pde_create(modname, PROC_DIR_UMODE, pde_parent, NULL, NULL);
-    assert(pde_parent);
-    return pde_create("parameters", PROC_DIR_UMODE, pde_parent, NULL, NULL);
-}
-
-error_t
-UMC_fuse_module_rmdir(char * modname)
-{
-    struct proc_dir_entry * pde_mymodule;
-    struct proc_dir_entry * pde_parent = UMC_PDE_ROOT;
-    pde_parent = UMCfuse_lookup(pde_parent, "sys");
-    assert(pde_parent);
-    pde_parent = UMCfuse_lookup(pde_parent, "module");
-    assert(pde_parent);
-    pde_mymodule = UMCfuse_lookup(pde_parent, modname);
-    if (!pde_mymodule)
-	return ENOENT;
-    pde_remove("parameters", pde_mymodule);
-    pde_remove(modname, pde_parent);
-    return E_OK;
-}
-
+/******************************************************************************/
 /* These are for reading and writing "module_param_named" global variables */
 /* They appear under /sys/module/THIS_MODULE->name/parameters */
 //XXXX You can write the variables, but nothing will happen unless someone then looks at them...
@@ -756,7 +711,7 @@ module_param_write(struct file * file, char const * buf, size_t writesize, loff_
 	return -ERANGE;
     }
 
-    struct proc_dir_entry * pde = PROC_I(file->inode)->pde;
+    struct proc_dir_entry * pde = inode_pde(file->inode);
     UMCfuse_node_check(pde);
     *(int *)pde->data = v;
     
@@ -772,7 +727,7 @@ module_param_read(struct file * file, void * buf, size_t readsize, loff_t * ofs)
     assert(buf);
     if (*ofs != 0) return 0;	    //XXX good enough?
 
-    struct proc_dir_entry * pde = PROC_I(file->inode)->pde;
+    struct proc_dir_entry * pde = inode_pde(file->inode);
     UMCfuse_node_check(pde);
     int nchar = snprintf(buf, readsize, "%d 0x%x\n",
 			 *(int *)pde->data, *(int *)pde->data);
@@ -793,13 +748,14 @@ module_param_release(struct inode * inode, struct file * file)
     return E_OK;
 }
 
-struct file_operations module_fops = {
+static struct file_operations module_fops = {
     .open = module_param_open,
     .release = module_param_release,
     .read = module_param_read,
     .write = module_param_write,
 };
 
+/* Create an entry in /sys/module/THIS_MODULE->name/parameters */
 struct proc_dir_entry *
 UMC_module_param_create(char const * name, void * varp, size_t size,
 			umode_t mode, struct module * owner)
@@ -816,7 +772,7 @@ UMC_module_param_create(char const * name, void * varp, size_t size,
     if (!parent)
 	return NULL;
 
-    struct proc_dir_entry * ret = pde_create(name, mode, parent, &module_fops, varp);
+    struct proc_dir_entry * ret = UMC_pde_create(name, mode, parent, &module_fops, varp);
     return ret;
 }
 
@@ -832,21 +788,55 @@ UMC_module_param_remove(char const * name, struct module * owner)
     if (!parent)
 	return ENOENT;
 
-    return pde_remove(name, parent);
+    return UMC_pde_remove(name, parent);
 }
 
+/* Create the /sys/module/THIS_MODULE->name/parameters directory for a module */
+struct proc_dir_entry *
+UMC_fuse_module_mkdir(char * modname)
+{
+    struct proc_dir_entry * pde_parent = UMC_PDE_ROOT;
+    pde_parent = UMCfuse_lookup(pde_parent, "sys");
+    assert(pde_parent);
+    pde_parent = UMCfuse_lookup(pde_parent, "module");
+    assert(pde_parent);
+    pde_parent = UMC_pde_create(modname, PROC_DIR_UMODE, pde_parent, NULL, NULL);
+    assert(pde_parent);
+    return UMC_pde_create("parameters", PROC_DIR_UMODE, pde_parent, NULL, NULL);
+}
+
+error_t
+UMC_fuse_module_rmdir(char * modname)
+{
+    struct proc_dir_entry * pde_mymodule;
+    struct proc_dir_entry * pde_parent = UMC_PDE_ROOT;
+    pde_parent = UMCfuse_lookup(pde_parent, "sys");
+    assert(pde_parent);
+    pde_parent = UMCfuse_lookup(pde_parent, "module");
+    assert(pde_parent);
+    pde_mymodule = UMCfuse_lookup(pde_parent, modname);
+    if (!pde_mymodule)
+	return ENOENT;
+    UMC_pde_remove("parameters", pde_mymodule);
+    UMC_pde_remove(modname, pde_parent);
+    return E_OK;
+}
+
+/******************************************************************************/
 /* Entries for /dev */
 
 struct proc_dir_entry *
 UMC_fuse_dev_add(const char * name, dev_t devt, umode_t mode)
 {
-    struct proc_dir_entry * ret = pde_create(name, mode, UMC_PDE_DEV, NULL, NULL);
-    ret->devt = devt;
-    return ret;
+    struct proc_dir_entry * pde = UMC_pde_create(name, mode, UMC_PDE_DEV, NULL, NULL);
+    pde_inode(pde)->i_rdev = devt;
+    pde_inode(pde)->i_bdev = NULL;  //XXXXXXX
+    // pde_inode(pde)->i_private = NULL;  //XXXXXXX
+    return pde;
 }
 
 error_t
 UMC_fuse_dev_remove(const char * name)
 {
-    return pde_remove(name, UMC_PDE_DEV);
+    return UMC_pde_remove(name, UMC_PDE_DEV);
 }
