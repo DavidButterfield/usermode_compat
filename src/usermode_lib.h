@@ -3547,8 +3547,9 @@ struct bio {
 #define BIO_EOF				2	/* I/O was out of bounds */
 #define BIO_CLONED			4	/* bio does not own data */
 
-#define bio_flagged(bio, bitno)		(((bio)->bi_flags &  (1 << (bitno))) != 0)
-#define bio_set_flag(bio, bitno)	(((bio)->bi_flags |= (1 << (bitno))))
+#define bio_flagged(bio, bitno)		(((bio)->bi_flags &   (1 << (bitno))) != 0)
+#define bio_set_flag(bio, bitno)	(((bio)->bi_flags |=  (1 << (bitno))))
+#define bio_clr_flag(bio, bitno)	(((bio)->bi_flags &=~ (1 << (bitno))))
 
 #define READ				0
 #define WRITE				1
@@ -3595,8 +3596,8 @@ static inline void
 bio_endio(struct bio * bio, error_t err)
 {
     if (err)
-	clear_bit(BIO_UPTODATE, &bio->bi_flags);
-    else if (!test_bit(BIO_UPTODATE, &bio->bi_flags))
+	bio_clr_flag(bio, BIO_UPTODATE);
+    else if (!bio_flagged(bio, BIO_UPTODATE))
 	err = -EIO;
 
     if (!err) {
@@ -3660,7 +3661,7 @@ bio_alloc(gfp_t gfp, unsigned int maxvec)
     bio->bi_io_vec = (struct bio_vec *)(bio+1);
     bio->bi_max_vecs = maxvec;
     bio->bi_destructor = bio_destructor;
-    set_bit(BIO_UPTODATE, &bio->bi_flags);
+    bio_set_flag(bio, BIO_UPTODATE);
     atomic_set(&bio->__bi_cnt, 1);
     return bio;
 }
@@ -3681,7 +3682,7 @@ bio_clone(struct bio * bio, gfp_t gfp)
 
     new_bio->bi_destructor = bio_destructor;
     atomic_set(&new_bio->__bi_cnt, 1);
-    new_bio->bi_flags |= 1<<BIO_CLONED;
+    bio_set_flag(bio, BIO_CLONED);
 
     return new_bio;
 }

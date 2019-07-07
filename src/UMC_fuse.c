@@ -23,6 +23,7 @@
 #define trace_fs(fmtargs...)	// trace(fmtargs)	/* calls from fuse */
 #define trace_app(fmtargs...)	// trace(fmtargs)	/* calls from app */
 #define trace_cb(fmtargs...)	// trace(fmtargs)	/* calls to app callbacks */
+#define trace_dev_cb(fa...)	// trace(fa)		/* calls to bdev callbacks */
 
 #define foreach_child_node(parent, node) \
     for ((node) = (parent)->child; node; node = node->sibling)
@@ -228,8 +229,9 @@ UMCfuse_node_readdir(struct proc_dir_entry * pde, void * buf, fuse_fill_dir_t fi
 
 /* We store a pointer to struct file in fuse_file_info->fh for open nodes */
 #define FFI_FILE(ffi)	((struct file *)(ffi)->fh)  /* fuse_file_info --> file */
-#define FFI_INODE(ffi)	(FFI_FILE(ffi)->inode)	    /* fuse_file_info --> inode */
+#define FFI_INODE(ffi)	file_inode(FFI_FILE(ffi))   /* fuse_file_info --> inode */
 #define FFI_PDE(ffi)	inode_pde(FFI_INODE(ffi))   /* fuse_file_info --> pde */
+#define FILE_PDE(file)	inode_pde(file_inode(file)) /* file --> pde */
 
 /* Call the pde's open function */
 static error_t
@@ -789,14 +791,14 @@ UMC_fuse_module_rmdir(char * modname)
 static error_t
 UMC_fuse_dev_open(struct inode * inode, struct file * file)
 {
-    trace_cb("=========== OPEN(%s)", file->inode->pde->name);
+    trace_dev_cb("=========== OPEN(%s)", FILE_PDE(file)->name);
     return inode->i_bdev->bd_disk->fops->open(inode->i_bdev, inode->i_mode);
 }
 
 static error_t
 UMC_fuse_dev_release(struct inode * inode, struct file * file)
 {
-    trace_cb("=========== RELEASE(%s)", file->inode->pde->name);
+    trace_dev_cb("=========== RELEASE(%s)", FILE_PDE(file)->name);
     inode->i_bdev->bd_disk->fops->release(inode->i_bdev->bd_disk, inode->i_mode);
     return E_OK;
 }
@@ -804,7 +806,7 @@ UMC_fuse_dev_release(struct inode * inode, struct file * file)
 static void
 UMC_fuse_endio(struct bio * bio, error_t err)
 {
-    trace_cb("=========== ENDIO()");
+    trace_dev_cb("=========== ENDIO()");
     bio->bi_error = err;
     complete((struct completion *)bio->bi_private);
 }
@@ -821,8 +823,8 @@ UMC_fuse_dev_io(struct file * file, void * buf, size_t iosize, loff_t * ofs, int
     memset(pages, 0, sizeof(pages));
 
     assert(buf);
-    expect_eq(*ofs % 512, 0);
-    expect_eq(iosize % 512, 0);
+    expect_eq(*ofs % 512, 0, "EINVAL unaligned file offset to bdev %s", FILE_PDE(file)->name);
+    expect_eq(iosize % 512, 0, "EINVAL unaligned iosize to bdev %s", FILE_PDE(file)->name);
     if (*ofs % 512)
 	return -EINVAL;
     if (iosize % 512)
@@ -856,9 +858,9 @@ UMC_fuse_dev_io(struct file * file, void * buf, size_t iosize, loff_t * ofs, int
 
     ssize_t ret = submit_bio(rw, bio);
     if (!ret) {
-	trace_cb("=========== AWAITING ENDIO()");
+	trace_dev_cb("=========== AWAITING ENDIO()");
 	wait_for_completion(&c);
-	trace_cb("=========== PASSED ENDIO()");
+	trace_dev_cb("=========== PASSED ENDIO()");
 	ret = bio->bi_error;
     }
 
@@ -873,21 +875,27 @@ UMC_fuse_dev_io(struct file * file, void * buf, size_t iosize, loff_t * ofs, int
 static ssize_t
 UMC_fuse_dev_read(struct file * file, void * buf, size_t iosize, loff_t * ofs)
 {
-    trace_cb("=========== READ(%s) %ld @%ld", file->inode->pde->name, iosize, *ofs);
-    return UMC_fuse_dev_io(file, buf, iosize, ofs, READ);
+    trace_dev_cb("=========== READ(%s) %ld @%ld", FILE_PDE(file)->name, iosize, *ofs);
+    ssize_t ret = UMC_fuse_dev_io(file, buf, iosize, ofs, READ);
+    if (ret < 0)
+	sys_warning("READ FAILED: (%s) %ld @%ld", FILE_PDE(file)->name, iosize, *ofs);
+    return ret;
 }
 
 static ssize_t
 UMC_fuse_dev_write(struct file * file, char const * buf, size_t iosize, loff_t * ofs)
 {
-    trace("=========== WRITE(%s) %ld @%ld", file->inode->pde->name, iosize, *ofs);
-    return UMC_fuse_dev_io(file, _unconstify(buf), iosize, ofs, WRITE);
+    trace_dev_cb("=========== WRITE(%s) %ld @%ld", FILE_PDE(file)->name, iosize, *ofs);
+    ssize_t ret = UMC_fuse_dev_io(file, _unconstify(buf), iosize, ofs, WRITE);
+    if (ret < 0)
+	sys_warning("WRITE FAILED: (%s) %ld @%ld", FILE_PDE(file)->name, iosize, *ofs);
+    return ret;
 }
 
 static error_t
 UMC_fuse_dev_fsync(struct file * file, int datasync)
 {
-    trace_cb("=========== FSYNC(%s)", file->inode->pde->name);
+    trace_dev_cb("=========== FSYNC(%s)", FILE_PDE(file)->name);
     struct proc_dir_entry * pde = inode_pde(file->inode);
     UMCfuse_node_check(pde);
     //XXXXX
@@ -983,9 +991,9 @@ UMC_fuse_run(void * unused)
 
 	// "-o", "auto_cache",	    /* invalidate kernel cache on each open (maybe?) */
 
-	"-o", "sync_read",	    /* perform all reads synchronously */
-	"-o", "sync",		    /* perform all I/O synchronously */
-	"-o", "max_readahead=0",    /* max bytes to read-ahead */
+	// "-o", "sync_read",	    /* perform all reads synchronously */
+	// "-o", "sync",	    /* perform all I/O synchronously */
+	// "-o", "max_readahead=0", /* max bytes to read-ahead */
 
 	"-o", "atomic_o_trunc",	    /* avoid calls to truncate */
 	"-o", "default_permissions",/* fuse do mode permission checking */
