@@ -1297,6 +1297,12 @@ UMC_exit(void)
     error_t err;
     assert(current);
 
+    netlink_shutdown();
+
+    irqthread_stop(UMC_irqthread);
+    irqthread_destroy(UMC_irqthread);
+    UMC_irqthread = NULL;
+
     err = UMC_fuse_stop();
     if (err == -EINVAL) { /* XXX Ignore for the SIGINT hack */ }
     else expect_noerr(err, "UMC_fuse_stop");
@@ -1305,12 +1311,6 @@ UMC_exit(void)
 	err = UMC_fuse_exit();
 	expect_noerr(err, "UMC_fuse_exit");
     }
-
-    netlink_shutdown();
-
-    irqthread_stop(UMC_irqthread);
-    irqthread_destroy(UMC_irqthread);
-    UMC_irqthread = NULL;
 
     flush_workqueue(UMC_workq);
     destroy_workqueue(UMC_workq);

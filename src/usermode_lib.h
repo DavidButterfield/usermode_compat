@@ -803,9 +803,15 @@ _mempool_create_kmalloc_pool(int min_nr, size_t size, sstring_t caller_id)
  * the concatination -- either or both strings may be NULL -- if both, NULL is returned.
  */
 //XXX ADD mem_string_concat_free() to the sys_services API
-#define string_concat_free(prefix, suffix) mem_string_concat_free((prefix), (suffix), FL_STR)
-extern string_t mem_string_concat_free(string_t const prefix, string_t const suffix,
-							sstring_t const caller_id);
+extern string_t mem_string_concat_free(string_t, string_t suffix, sstring_t caller_id);
+
+#define string_concat_free(prefix, suffix) _string_concat_free((prefix), (suffix), FL_STR)
+
+static inline string_t
+_string_concat_free(string_t prefix, string_t suffix, sstring_t caller_id)
+{
+    return mem_string_concat_free(prefix, suffix, caller_id);
+}
 
 #define scnprintf(buf, bufsize, fmtargs...) snprintf((buf), (bufsize), fmtargs)
 #define vscnprintf(buf, bufsize, fmt, va)  vsnprintf((buf), (bufsize), fmt, va)
@@ -2758,7 +2764,7 @@ static inline void *
 _page_pool_alloc(gfp_t gfp, void * mp_v)
 {
     mempool_t * mp = mp_v;
-    struct page * page = kmem_cache_alloc(mp->pool_data3, gfp);
+    struct page * page = kmem_cache_zalloc(mp->pool_data3, gfp);
     expect_eq(mp->private, 0);	/* only order zero for now */
     kref_init(&page->kref);
     mutex_init(&page->lock);
@@ -2919,14 +2925,18 @@ struct inode {
     loff_t			i_size;		/* device or file size in bytes */
     unsigned int		i_flags;	/* O_RDONLY, O_RDWR */
     struct mutex		i_mutex;
+    time_t			i_atime;
+    time_t			i_mtime;
+    time_t			i_ctime;
 
     unsigned int		i_blkbits;	/* log2(block_size) */
     struct block_device	      * i_bdev;		/* when I_TYPE_BDEV */
     dev_t			i_rdev;		/* device major/minor */
 
-    time_t			i_atime;
-    time_t			i_mtime;
-//  time_t			i_ctime;
+    union {
+	struct UMC_fuse_node  * UMC_node;
+	struct UMC_fuse_node  * pde;		/* name expected by SCST */
+    };
 
     /* unused */
 //  unsigned long		i_ino;
@@ -2951,6 +2961,7 @@ struct inode {
     (inode)->i_size = (size); \
     (inode)->i_flags = (oflags); \
     mutex_init(&(inode)->i_mutex); \
+    (inode)->i_atime = (inode)->i_mtime = (inode)->i_ctime = time(NULL); \
 } while (0)
 
 static inline void
@@ -3003,6 +3014,7 @@ struct file_operations {
     long	 (* unlocked_ioctl)(struct file *, unsigned int cmd, unsigned long);
     ssize_t	 (* write)(struct file *, char const * buf, size_t len, loff_t * ofsp);
     ssize_t	 (* read)(struct file *, void * buf, size_t len, loff_t * ofsp);
+    int		 (* fsync)(struct file *, int datasync);
     loff_t	 (* llseek)(struct file *, loff_t, int);
 };
 
@@ -3245,9 +3257,6 @@ bdget(dev_t devt)
     bdev->bd_inode = inode;
     bdev->bd_block_size = (1 << inode->i_blkbits);
 
-    struct block_device * bdev_check = BDEV_I(inode);
-    assert_eq(bdev_check, bdev);
-
 //  spin_lock(&bdev_lock);
 //  list_add(&bdev->bd_list, &all_bdevs);
 //  spin_unlock(&bdev_lock);
@@ -3260,7 +3269,7 @@ bdget(dev_t devt)
 #define bdevname(bdev, buf) \
 	    ({ snprintf((buf), BDEVNAME_SIZE, "%s", (bdev)->bd_disk->disk_name); (buf); })
 
-#define fsync_bdev(bdev)		fsync((bdev)->bd_inode->UMC_fd)
+#define fsync_bdev(bdev)		fsync((bdev)->bd_inode->UMC_fd)	//XXXXX bogus
 
 #define set_disk_ro(disk, flag)		((disk)->part0.policy = (flag))
 #define bdev_read_only(bdev)		((bdev)->bd_disk->part0.policy != 0)
@@ -3303,8 +3312,10 @@ struct gendisk {
 extern struct list_head UMC_disk_list;
 extern struct spinlock UMC_disk_list_lock;
 
-#define UMC_DEV_PREFIX	"/UMCdev/"
+extern const char * UMC_fuse_mount_point;   /* e.g. "/UMCfuse" */
 
+/* Expects internal device names like "/UMCfuse/dev/drbd1" */
+//XXX lookup key belongs with the dev, not with the gendisk
 static inline struct block_device *
 lookup_bdev(const char * path)
 {
@@ -3312,12 +3323,16 @@ lookup_bdev(const char * path)
     struct gendisk * pos;
     const char *p;
 
-    if (strncmp(path, UMC_DEV_PREFIX, sizeof(UMC_DEV_PREFIX)-1)) {
+    static char prefix[64];
+    if (!*prefix)
+	snprintf(prefix, sizeof(prefix), "%s/dev/", UMC_fuse_mount_point);
+
+    if (strncmp(path, prefix, strlen(prefix))) {
 	sys_warning("Bad device name prefix: %s", path);
 	return NULL;
     }
 
-    p = path + sizeof(UMC_DEV_PREFIX) - 1;  /* skip prefix */
+    p = path + strlen(prefix);	/* skip prefix to name under /dev */
 
     spin_lock(&UMC_disk_list_lock);
 
@@ -3331,6 +3346,7 @@ lookup_bdev(const char * path)
     bdgrab(bdev);	/* ++refcount (under lock) */
 
     spin_unlock(&UMC_disk_list_lock);
+
     return bdev;
 }
 
@@ -3355,6 +3371,7 @@ open_bdev_exclusive(const char *path, fmode_t mode, void *holder)
     assert_eq(bdev->bd_contains, bdev);
     assert(bdev->bd_disk);
     assert(bdev->bd_disk->fops);
+    assert(bdev->bd_disk->fops->open);
     assert(bdev->bd_disk->fops->release);
 
     int error = bdev->bd_disk->fops->open(bdev, mode);
@@ -3375,6 +3392,7 @@ close_bdev_exclusive(struct block_device *bdev, fmode_t mode)
     assert_eq(bdev->bd_contains, bdev);
     assert(bdev->bd_disk);
     assert(bdev->bd_disk->fops);
+    assert(bdev->bd_disk->fops->release);
 
     sys_notice("name='%s' size=%"PRIu64, bdev->bd_disk->disk_name, bdev_size(bdev));
 
@@ -3413,15 +3431,20 @@ filp_close_bdev(struct file * file)
 }
 
 static inline struct file *
-filp_open(string_t name, int flags, umode_t mode)
+filp_open(string_t path, int flags, umode_t mode)
 {
     /* XXX Hack to detect internal block device names not in the real filesystem */
-    if (!strncmp(name, UMC_DEV_PREFIX, sizeof(UMC_DEV_PREFIX)-1))
-	/* name is intended as a UMC internal name */
-	return filp_open_bdev(name, flags);
-    else
-	/* name is intended as a real name in the real filesystem */
-	return filp_open_real(name, flags, mode);
+    static char prefix[64];
+    if (!*prefix)
+	snprintf(prefix, sizeof(prefix), "%s/dev/", UMC_fuse_mount_point);
+
+    if (!strncmp(path, prefix, strlen(prefix))) {
+	/* path is intended as a UMC internal name */
+	return filp_open_bdev(path, flags);
+    } else {
+	/* path is intended as a real name in the real filesystem */
+	return filp_open_real(path, flags, mode);
+    }
 }
 
 static inline void
@@ -3446,13 +3469,13 @@ alloc_disk(int nminors)
 #define put_disk(disk)			kobject_put(&disk_to_dev(disk)->kobj)
 
 /* Add a device entry in /UMCfuse/dev */
-extern struct proc_dir_entry * UMC_fuse_dev_add(const char * name, dev_t, umode_t);
-extern error_t UMC_fuse_dev_remove(const char * name);
+extern struct UMC_fuse_node * UMC_fuse_bdev_add(const char * name, struct inode *);
+extern error_t UMC_fuse_bdev_remove(const char * name);
 
 static inline void
 del_gendisk(struct gendisk * disk)
 {
-    UMC_fuse_dev_remove(disk->disk_name);
+    UMC_fuse_bdev_remove(disk->disk_name);  //XXX add happening too far away
 
     spin_lock(&UMC_disk_list_lock);
     list_del(&disk->disk_list);		/* remove from UMC_disk_list */
@@ -3472,9 +3495,6 @@ add_disk(struct gendisk * disk)
     spin_unlock(&UMC_disk_list_lock);
     // register_disk(NULL, disk);
     // blk_register_queue(disk);
-
-    umode_t mode = S_IFBLK | (disk->part0.policy ? 0440 : 0660);
-    UMC_fuse_dev_add(disk->disk_name, devt, mode);
 }
 
 #define set_capacity(disk, nsectors)	((disk)->part0.nr_sects = (nsectors))
@@ -3509,7 +3529,7 @@ struct bio {
 	unsigned int		bi_size;	/* residual I/O count */
 	sector_t		bi_sector;	/* device address in 512 byte sectors */
 	unsigned long		bi_rw;		/* READ/WRITE, FUA */
-	unsigned long		bi_flags;	/* status, command, etc */
+	unsigned long		bi_flags;
 
 	void		      (*bi_destructor)(struct bio *);	/* set by bio_clone */
 	atomic_t		__bi_cnt;	/* reference count */
@@ -3523,8 +3543,12 @@ struct bio {
 };
 
 /* bi_flags bit numbers */
-#define BIO_UPTODATE			0
-#define BIO_CLONED			2
+#define BIO_UPTODATE			0	/* completed OK */
+#define BIO_EOF				2	/* I/O was out of bounds */
+#define BIO_CLONED			4	/* bio does not own data */
+
+#define bio_flagged(bio, bitno)		(((bio)->bi_flags &  (1 << (bitno))) != 0)
+#define bio_set_flag(bio, bitno)	(((bio)->bi_flags |= (1 << (bitno))))
 
 #define READ				0
 #define WRITE				1
@@ -3559,15 +3583,30 @@ struct bio {
 
 #define bio_iovec(bio)			((bio)->bi_io_vec)
 #define bio_set_dev(bio, bdev)		((bio)->bi_bdev = (bdev))
-#define bio_iovec_idx(bio, idx)		(&((bio)->bi_io_vec[(idx)]))
+#define bio_iovec_idx(bio, idx)		(&((bio)->bi_io_vec[idx]))
 
 #define op_is_write(op)			((op) & 1)
 #define bio_data_dir(bio)		(op_is_write(bio_op(bio)) ? WRITE : READ)
 #define bio_get_nr_vecs(bdev)		BIO_MAX_PAGES
-#define bio_flagged(bio, bitno)		(((bio)->bi_flags & (1 << (bitno))) != 0)
 
 #define bio_get(bio)			atomic_inc(&(bio)->__bi_cnt)
-#define bio_endio(bio, err)		do { if ((bio)->bi_end_io) (bio)->bi_end_io((bio), (err)); } while (0)
+
+static inline void
+bio_endio(struct bio * bio, error_t err)
+{
+    if (err)
+	clear_bit(BIO_UPTODATE, &bio->bi_flags);
+    else if (!test_bit(BIO_UPTODATE, &bio->bi_flags))
+	err = -EIO;
+
+    if (!err) {
+	bio->bi_sector += bio->bi_size/512;
+	bio->bi_size = 0;	/* resid */
+    }
+
+    if (bio->bi_end_io)
+	bio->bi_end_io(bio, err);
+}
 
 #define __bio_for_each_segment(bvl, bio, i, start_idx)			\
 	for (bvl = bio_iovec_idx((bio), (start_idx)), i = (start_idx);  \
@@ -3621,7 +3660,7 @@ bio_alloc(gfp_t gfp, unsigned int maxvec)
     bio->bi_io_vec = (struct bio_vec *)(bio+1);
     bio->bi_max_vecs = maxvec;
     bio->bi_destructor = bio_destructor;
-    bio->bi_flags |= 1<<BIO_UPTODATE;
+    set_bit(BIO_UPTODATE, &bio->bi_flags);
     atomic_set(&bio->__bi_cnt, 1);
     return bio;
 }
@@ -3650,17 +3689,17 @@ bio_clone(struct bio * bio, gfp_t gfp)
 static inline void
 __bio_add_page(struct bio *bio, struct page *page, unsigned int len, unsigned int off)
 {
-	struct bio_vec *bv = &bio->bi_io_vec[bio->bi_vcnt];
+    struct bio_vec *bv = &bio->bi_io_vec[bio->bi_vcnt];
 
-	WARN_ON_ONCE(bio_flagged(bio, BIO_CLONED));
-	assert(bio->bi_vcnt < bio->bi_max_vecs);
+    WARN_ON_ONCE(bio_flagged(bio, BIO_CLONED));
+    assert(bio->bi_vcnt < bio->bi_max_vecs);
 
-	bv->bv_page = page;
-	bv->bv_offset = off;
-	bv->bv_len = len;
+    bv->bv_page = page;
+    bv->bv_offset = off;
+    bv->bv_len = len;
 
-	bio->bi_size += len;
-	bio->bi_vcnt++;
+    bio->bi_size += len;
+    bio->bi_vcnt++;
 }
 
 /* Append a page (or part of a page) to the data area for the bio */
@@ -3676,14 +3715,14 @@ bio_add_page(struct bio * bio, struct page * page, unsigned int len, unsigned in
 #define bio_add_pc_page(q, bio, page, bytes, ofs) \
 					bio_add_page((bio), (page), (bytes), (ofs))
 
-static inline int
+static inline error_t
 submit_bio(int rw, struct bio * bio)
 {
     bio->bi_rw |= rw;
     return bio->bi_bdev->bd_disk->queue->make_request_fn(bio->bi_bdev->bd_disk->queue, bio);
 }
 
-static inline int
+static inline error_t
 _submit_bio(struct bio * bio)
 {
     return bio->bi_bdev->bd_disk->queue->make_request_fn(bio->bi_bdev->bd_disk->queue, bio);
@@ -4238,22 +4277,26 @@ seq_read(struct file * file, void * buf, size_t size, loff_t * lofsp)
 	*lofsp += reply_size;
     }
 
-    if (seq->reply) vfree(seq->reply);
+    if (seq->reply) {
+	vfree(seq->reply);
+	seq->reply = NULL;
+    }
 
     return (ssize_t)reply_size;
 }
 
 /* /proc and/or /sys simulated by mapping our proc_dir_entry tree to the FUSE filesystem API */
+#define proc_dir_entry			UMC_fuse_node
 
 /* Internal representation of fuse filesystem, including (simulated) /proc tree */
-struct proc_dir_entry {
-    struct proc_dir_entry	      * parent;	    /* root's parent is NULL */
-    struct proc_dir_entry	      * sibling;    /* null terminated list */
-    struct proc_dir_entry	      * child;	    /* first child (if nonempty DIR) */
-    struct module		      * owner;	    /* still in 2.6.24 */
+struct UMC_fuse_node {
+    struct UMC_fuse_node	      * parent;	    /* root's parent is NULL */
+    struct UMC_fuse_node	      * sibling;    /* null terminated list */
+    struct UMC_fuse_node	      * child;	    /* first child (if nonempty DIR) */
+    struct inode		      * inode;
+    struct module		      * owner;	    /* unused */
     const struct file_operations      *	proc_fops;
     void			      * data;
-    umode_t				mode;	    //XXX same as inode->i_mode
     u8					namelen;
     char				name[1];    /* space for '\0' */
 };
@@ -4264,9 +4307,9 @@ struct proc_dir_entry {
 #define PROC_FILE_UMODE_RW		(S_IFREG | 0664)
 
 /* Application calls here to create /proc PDE tree -- NULL parent refers to the /proc node */
-extern struct proc_dir_entry * UMC_pde_create(char const *, umode_t, struct proc_dir_entry *,
+extern struct UMC_fuse_node * UMC_pde_create(char const *, umode_t, struct UMC_fuse_node *,
 						const struct file_operations *, void *);
-extern error_t UMC_pde_remove(char const * name, struct proc_dir_entry * parent);
+extern error_t UMC_pde_remove(char const * name, struct UMC_fuse_node * parent);
 
 #define proc_create_data(name, mode, parent, fops, data) \
 		UMC_pde_create((name), (mode), (parent), (fops), (data))
@@ -4278,7 +4321,7 @@ extern error_t UMC_pde_remove(char const * name, struct proc_dir_entry * parent)
 		proc_create_data((name), (mode), (parent), NULL, NULL)
 
 /* Called by *_compat.c init/exit function to create /sys/module/THIS_MODULE->name/parameters */
-extern struct proc_dir_entry * UMC_fuse_module_mkdir(char * modname);
+extern struct UMC_fuse_node * UMC_fuse_module_mkdir(char * modname);
 extern error_t UMC_fuse_module_rmdir(char * modname);
 
 #define proc_mkdir(name, parent)	    \
@@ -4289,7 +4332,7 @@ extern error_t UMC_fuse_module_rmdir(char * modname);
 /* These are for accessing "module_param_named" variables */
 //XXX You can write them, but unless someone then notices the changed value, nothing happens
 
-extern struct proc_dir_entry * UMC_module_param_create(char const *, void *, size_t,
+extern struct UMC_fuse_node * UMC_module_param_create(char const *, void *, size_t,
 						umode_t, struct module *);
 
 extern error_t UMC_module_param_remove(char const * name, struct module *);
@@ -4321,19 +4364,11 @@ extern error_t UMC_fuse_start(const char * mountpoint);
 extern error_t UMC_fuse_stop(void);
 extern error_t UMC_fuse_exit(void);
 
-struct proc_inode {
-    struct kobject kobj;		/* 2.6.26 */	//XXXXX
-    struct proc_dir_entry * pde;	/* 2.6.24 */
-    struct inode			vfs_inode;
-    struct proc_dir_entry pde_s;
-};
+/* SCST utters PROC_I(inode)->pde->data */
+#define PROC_I(inode)	({ assert_eq((inode)->UMC_type, I_TYPE_PROC); (inode); })
 
-#define PROC_I(inode)			({ assert_eq((inode)->UMC_type, I_TYPE_PROC); \
-					   container_of(inode, struct proc_inode, vfs_inode); \
-					})
-
-#define pde_inode(pde)			(&container_of((pde), struct proc_inode, pde_s)->vfs_inode)
-#define inode_pde(inode)		(PROC_I(inode)->pde)
+#define pde_inode(pde)			((pde)->inode)
+#define inode_pde(inode)		((inode)->pde)
 #define PDE(inode)			inode_pde(inode)
 
 /*** iput ***/
