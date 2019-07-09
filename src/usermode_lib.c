@@ -8,7 +8,7 @@
 #define NAME USERMODE_LIB
 
 #include <sys/socket.h>
-#include </usr/include/asm-generic/socket.h> //XXX sys/socket.h included the wrong asm/socket.h
+#include </usr/include/asm-generic/socket.h> /* sys/socket.h included the wrong asm/socket.h */
 
 #define  NO_UMC_SOCKETS		// inhibit usermode_lib ucred for one in sys/socket.h
 #include "usermode_lib.h"	// must be after sys/socket.h, when NO_UMC_SOCKETS
@@ -45,7 +45,7 @@ simple_strtoul(const char * str, char ** endptr, unsigned int base)
     return strtoul(str, endptr, base);
 }
 
-//XXX should be more strict
+//XXX strict_strtoul() should be more strict
 
 error_t
 strict_strtoul(const char * str, unsigned int base, unsigned long * var)
@@ -153,10 +153,11 @@ void
 UMC_alarm_handler(void * const v_timer, uint64_t const now, error_t const err)
 {
     assert_eq(err, E_OK);
-    if (unlikely(err != E_OK)) return;
+    if (unlikely(err != E_OK))
+	return;
 
     struct timer_list * const timer = v_timer;
-    //XXXXX expect_ne(timer->alarm, 0);   //XXX Bug when alarm goes off quickly
+    //XXXXX expect_ne(timer->alarm, 0);   // Bug when alarm goes off quickly
 
     //XXX A very recent call to mod_timer() may have updated the expire time
     // assert(time_after_eq(now, jiffies_to_sys_time(timer->expires)));
@@ -597,7 +598,7 @@ UMC_sock_getname(struct socket * sock, struct sockaddr * addr, socklen_t * addrl
 error_t
 UMC_sock_connect(struct socket * sock, struct sockaddr * addr, socklen_t addrlen, int flags)
 {
-    //XXX flags ?
+    //XXX UMC_sock_connect flags ?
     struct sockaddr_in * inaddr = (struct sockaddr_in *)addr;
     sys_notice("%s (%d) connecting socket fd=%d to %d.%d.%d.%d port %u",
 		current->comm, current->pid, sock->sk->fd,
@@ -625,6 +626,7 @@ UMC_sock_bind(struct socket * sock, struct sockaddr *addr, socklen_t addrlen)
 	struct sockaddr_in * inaddr = (struct sockaddr_in *)addr;
 	if (inaddr->sin_port != 0) {
 	    int optval = true;
+	    //XXX Should leave setting SO_REUSEADDR to the app -- see also SK_CAN_REUSE
 	    UMC_setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));	//XXX
 	}
 
@@ -691,7 +693,7 @@ UMC_sock_accept(struct socket * listener, struct socket ** newsock, int flags)
     if(flags & SOCK_NONBLOCK)
 	(*newsock)->nonblocking = true;
 
-    (*newsock)->sk->sk_state_change = listener->sk->sk_state_change;	//XXX why?
+    (*newsock)->sk->sk_state_change = listener->sk->sk_state_change;	//XXX Right? Why?
 
     sys_notice("Accepted incoming socket connection listenfd=%d newfd=%d peer_port=%d",
 		listener->sk->fd, newfd, ntohs((*newsock)->sk->sk_dport));
@@ -703,9 +705,12 @@ error_t
 UMC_sock_shutdown(struct socket * sock, int k_how)
 {
     int u_how;
-    if ((k_how & RCV_SHUTDOWN) && (k_how & SEND_SHUTDOWN)) u_how = SHUT_RDWR;
-    else if (k_how & RCV_SHUTDOWN) u_how = SHUT_RD;
-    else if (k_how & SEND_SHUTDOWN) u_how = SHUT_WR;
+    if ((k_how & RCV_SHUTDOWN) && (k_how & SEND_SHUTDOWN))
+	u_how = SHUT_RDWR;
+    else if (k_how & RCV_SHUTDOWN)
+	u_how = SHUT_RD;
+    else if (k_how & SEND_SHUTDOWN)
+	u_how = SHUT_WR;
     else {
 	sys_warning("UMC_sock_shutdown called with bad flags 0x%x", k_how);
 	u_how = SHUT_RDWR;
@@ -846,7 +851,7 @@ restart:
     return (int)rc;
 }
 
-//XXX Probably doesn't need the "skip" from UMC_sock_recvmsg()
+//XXXX Probably doesn't need the "skip" from UMC_sock_recvmsg()
 error_t
 UMC_kernel_recvmsg(struct socket * sock, struct msghdr * msg, struct kvec * kvec,
 		int num_sg, size_t nbytes, int flags, sstring_t caller_id)
@@ -993,7 +998,7 @@ netlink_dump(struct sock *sk)
 
 	len = cb->dump(skb, cb);
 
-#if 0	//XXX
+#if 0	//XXX how do repeat calls of netlink_dump() happen?
 	// Someone is supposed to call this function repeatedly...
 	if (len > 0) {
 		mutex_unlock(nlk->cb_mutex);
@@ -1304,8 +1309,10 @@ UMC_exit(void)
     UMC_irqthread = NULL;
 
     err = UMC_fuse_stop();
-    if (err == -EINVAL) { /* XXX Ignore for the SIGINT hack */ }
-    else expect_noerr(err, "UMC_fuse_stop");
+    if (err == -EINVAL)
+	{ /* XXX Ignore for the SIGINT hack */ }
+    else
+	expect_noerr(err, "UMC_fuse_stop");
 
     if (!err) {
 	err = UMC_fuse_exit();
@@ -1352,12 +1359,18 @@ si_meminfo(struct sysinfo *si)
 #include <sys/resource.h>
 
 error_t
+set_user_nice(struct task_struct * task, int niceness)
+{
+    return UMC_kernelize(setpriority(PRIO_PROCESS, (id_t)task->pid, niceness));
+}
+
+error_t
 UMC_sched_setscheduler(struct task_struct * task, int policy, struct sched_param * param)
 {
 //XXX He probably wants the realtime scheduler, but not happening today
 //  return UMC_kernelize(sched_setscheduler(task->pid, policy, param));
     // nice him up instead
-    setpriority(PRIO_PROCESS, (id_t)task->pid, param->sched_priority > 0 ? -20 : 0);
+    set_user_nice(task, param->sched_priority > 0 ? -20 : 0);
     return E_OK;
 }
 

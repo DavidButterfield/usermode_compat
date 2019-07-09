@@ -17,8 +17,8 @@
 
 typedef __u32 __kernel_dev_t;
 
-//XXX	typedef __kernel_fd_set		fd_set;
-//XXX	typedef __kernel_dev_t		dev_t;
+//UMC	typedef __kernel_fd_set		fd_set;
+//UMC	typedef __kernel_dev_t		dev_t;
 typedef __kernel_ino_t		ino_t;
 typedef __kernel_mode_t		mode_t;
 typedef __kernel_nlink_t	nlink_t;
@@ -27,11 +27,11 @@ typedef __kernel_pid_t		pid_t;
 typedef __kernel_daddr_t	daddr_t;
 typedef __kernel_key_t		key_t;
 typedef __kernel_suseconds_t	suseconds_t;
-//XXX	typedef __kernel_timer_t	timer_t;
+//UMC	typedef __kernel_timer_t	timer_t;
 typedef __kernel_clockid_t	clockid_t;
 typedef __kernel_mqd_t		mqd_t;
 
-//XXX	typedef _Bool			bool;
+//UMC	typedef _Bool			bool;
 
 typedef __kernel_uid32_t	uid_t;
 typedef __kernel_gid32_t	gid_t;
@@ -47,7 +47,7 @@ typedef __kernel_old_gid_t	old_gid_t;
 #endif /* CONFIG_UID16 */
 
 #if defined(__GNUC__)
-//XXX	typedef __kernel_loff_t		loff_t;
+//UMC	typedef __kernel_loff_t		loff_t;
 #endif
 
 /*
@@ -113,9 +113,9 @@ typedef		__u16		uint16_t;
 typedef		__u32		uint32_t;
 
 #if defined(__GNUC__)
-//XXX	typedef		__u64		uint64_t;
-//XXX	typedef		__u64		u_int64_t;
-//XXX	typedef		__s64		int64_t;
+//UMC	typedef		__u64		uint64_t;
+//UMC	typedef		__u64		u_int64_t;
+//UMC	typedef		__s64		int64_t;
 #endif
 
 /* this is a special 64bit data type that is 8-byte aligned */
@@ -133,10 +133,10 @@ typedef		__u32		uint32_t;
  */
 #ifdef CONFIG_LBDAF
 typedef u64 sector_t;
-//XXX	typedef u64 blkcnt_t;
+//UMC	typedef u64 blkcnt_t;
 #else
 typedef unsigned long sector_t;
-//XXX	typedef unsigned long blkcnt_t;
+//UMC	typedef unsigned long blkcnt_t;
 #endif
 
 /*

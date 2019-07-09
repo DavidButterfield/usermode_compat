@@ -32,7 +32,7 @@ const char * UMC_fuse_mount_point;
 
 //XXX limitation: single instance
 static volatile sys_thread_t UMC_FUSE_THREAD;	/* thread runs fuse loop */
-static DEFINE_MUTEX(UMC_fuse_lock);		//XXX nasty big lock could be fixed
+static DEFINE_MUTEX(UMC_fuse_lock);		//XXXX nasty big lock could be fixed
 static struct proc_dir_entry * UMC_PDE_ROOT;    /* /UMCfuse		*/
 static struct proc_dir_entry * UMC_PDE_PROC;	/* /UMCfuse/proc	*/
 static struct proc_dir_entry * UMC_PDE_DEV;	/* /UMCfuse/dev		*/
@@ -180,9 +180,6 @@ UMCfuse_node_getattr(struct proc_dir_entry * pde, struct stat * st)
      * fuse additionally assumes that to mean to let the kernel interpret the dev_t as
      * referring to a kernel major/minor, instead of presenting system calls to our
      * handlers as for other st_mode values.
-     *
-     * Unfortunately this workaround makes the node look like a file, which drbdmeta
-     * cannot handle because it expects to see a block device.	XXX
      */
     if (S_ISBLK(pde->inode->i_mode))
 	st->st_mode = S_IFREG | (pde->inode->i_mode & 0777);
@@ -653,7 +650,7 @@ module_param_write(struct file * file, char const * buf, size_t writesize, loff_
     assert_eq(*ofs, 0);
 
     errno = 0;
-    long v = strtol(buf, NULL, 0);
+    long long data = strtoll(buf, NULL, 0);
     if (errno != 0) {
 	return -EINVAL;
     }
@@ -662,7 +659,6 @@ module_param_write(struct file * file, char const * buf, size_t writesize, loff_
     UMCfuse_node_check(pde);
 
     //XXXX endian
-    long long data = strtoll(buf, NULL, 0);
     size_t size = min(sizeof(data), pde->inode->i_size);
     memcpy(pde->data, &data, size);
     
@@ -721,7 +717,7 @@ struct proc_dir_entry *
 UMC_module_param_create(char const * name, void * varp, size_t size,
 			umode_t mode, struct module * owner)
 {
-    assert(size == 1 || size == 2 || size == 4 || size == 8, "%d", size);
+    assert(size == 1 || size == 2 || size == 4 || size == 8, "%ld", size);
 
     /* e.g. /UMCroot/sys/module/scsi_tgt/parameters/xxx */
     struct proc_dir_entry * parent = UMC_PDE_MOD;
@@ -898,7 +894,7 @@ UMC_fuse_dev_fsync(struct file * file, int datasync)
     trace_dev_cb("=========== FSYNC(%s)", FILE_PDE(file)->name);
     struct proc_dir_entry * pde = inode_pde(file->inode);
     UMCfuse_node_check(pde);
-    //XXXXX
+    //XXXXX UMC_fuse_dev_fsync() unimplemented
     return E_OK;
 }
 

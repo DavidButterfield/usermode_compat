@@ -40,8 +40,7 @@ static unsigned long *mc_groups = &mc_group_start;
 static unsigned long mc_groups_longs = 1;
 #endif
 
-#define genl_ctrl_event(ctrl, arg)  /* */
-//XXX static int genl_ctrl_event(int event, void *data);
+#define genl_ctrl_event(event, data)  /* */
 
 static inline unsigned int genl_family_hash(unsigned int id)
 {
