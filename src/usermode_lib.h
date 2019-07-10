@@ -700,8 +700,6 @@ mempool_free(void * addr, mempool_t * mp)
 {
     if (addr)
 	mp->free_fn(addr, mp->pool_data);
-    else
-	sys_backtrace("Attempt to mempool_free(NULL)");
 }
 
 /* Destroy the mempool (but empty it first) */
@@ -906,7 +904,7 @@ call_usermodehelper(const char * progpath, char * argv[], char * envp[], int wai
 #define atomic_dec_and_test(ptr)	(!atomic_dec_return(ptr)) /* true if result *IS* zero */
 #define atomic_sub_and_test(n, ptr)	(!atomic_sub_return((n), (ptr)))
 
-/* Installs the new 8-byte value at addr and returns the old value */
+/* Installs the new value at addr and returns the old value */
 #define xchg(addr, newv) ({ \
 	    typeof(*addr) ____newv = (newv); \
 	    typeof(*addr) ____oldv; \
@@ -942,10 +940,6 @@ atomic_add_unless(atomic_t * ptr, int increment, int unless_match)
     return oldval;
 }
 
-struct spinlock;
-extern int _atomic_dec_and_lock(atomic_t * atomic, struct spinlock * lock);
-#define atomic_dec_and_lock(atomic, lock) _atomic_dec_and_lock(atomic, lock)
-
 /*** Bitmap (non-atomic) ***/
 
 static inline bool
@@ -977,10 +971,6 @@ _bitmap_set_bit(unsigned long * dst, unsigned int bitno)
 
 #define UMC_LOCK_CHECKS	    /* do lock checks in all builds */
 
-#if 1	    //XXX _SPINWAITING()
-//XXXX change this to only yield after some number (like 100) of spins
-#define _SPINWAITING()			usleep(1)
-#else
 #if defined(__i386__) || defined(__x86_64__)
   /* Avoid clogging CPU pipeline with lock fetches for several times around a spinloop */
   #ifdef NVALGRIND
@@ -993,11 +983,29 @@ _bitmap_set_bit(unsigned long * dst, unsigned int bitno)
 #else
   #define _SPINWAITING()		DO_NOTHING()
 #endif
-#endif
+
+/* Simple spinlock for internal use */
+typedef struct UMC_spinlock {
+    atomic_t		    bit;
+} UMC_spinlock_t;
+
+static inline void
+UMC_spin_lock(UMC_spinlock_t * lock)
+{
+    while (atomic_xchg(&lock->bit, 1))
+	_SPINWAITING();
+}
+
+static inline void
+UMC_spin_unlock(UMC_spinlock_t * lock)
+{
+    int ret = atomic_xchg(&lock->bit, 0);
+    expect_eq(ret, 1);
+}
 
 /* Multi-Reader/Single-Writer SPIN lock -- favors readers, recursive read OK */
 typedef struct rwlock {
-    atomic_t	   volatile count;	/* units available to take */
+    atomic_t		    count;	/* units available to take */
 #ifdef UMC_LOCK_CHECKS
     sys_thread_t   volatile owner;	/* exclusive holder (writer), if any */
 #endif
@@ -1081,7 +1089,7 @@ rwlock_drop(rwlock_t * rw, uint32_t ndrop)
 	rw->owner = NULL;
     }
     int32_t new_count = atomic_add_return(ndrop, &(rw)->count);
-    verify_le(new_count, _RW_LOCK_WR_COUNT, "double unlock?");
+    verify_le(new_count, _RW_LOCK_WR_COUNT, "overlocked?");
 #else
     atomic_add(ndrop, &(rw)->count);
 #endif
@@ -1107,92 +1115,211 @@ rwlock_drop(rwlock_t * rw, uint32_t ndrop)
 #define preempt_disable()		DO_NOTHING()
 #define preempt_enable()		DO_NOTHING()
 
-/* Mutex SPIN lock */
-/* Implement using a pthread_mutex and _trylock(), so it can work with pthread_cond_t */
-typedef struct spinlock {
-#ifdef UMC_LOCK_CHECKS
-    sys_thread_t   volatile owner;	/* current locker */
-#endif
-    pthread_mutex_t	    plock;
-    sstring_t		    name;
-    sstring_t		    whence;	/* last locker */
-} spinlock_t;				//XXX add some spinlock stats
+/*** Sleepable mutex lock -- also used for spinlock mutex using _trylock() ***/
+typedef struct mutex {
+    sys_thread_t               volatile owner;		/* the exclusive holder */
+    pthread_mutex_t		        lock;
+    UMC_spinlock_t		        nest_lock;	/* for nested spinlock */
+    atomic_t				nest;		/* lock nest monster */
+    sstring_t				name;
+    sstring_t				last_locker;	/* FILE:LINE of last locker */
+    //XXX stats
+} mutex_t;
 
-#define SPINLOCK_UNLOCKED(lock)		{ .plock = PTHREAD_MUTEX_INITIALIZER, .name = #lock }
-#define DEFINE_SPINLOCK(lock)		spinlock_t lock = SPINLOCK_UNLOCKED(#lock)
-#define spin_lock_init(lock)		(*(lock) = (spinlock_t)SPINLOCK_UNLOCKED(#lock))
-#define assert_spin_locked(lock)	spin_lock_assert_holding(lock)
+#define MUTEX_UNLOCKED(m)		((struct mutex){ .lock = PTHREAD_MUTEX_INITIALIZER, .name = #m })
+#define DEFINE_MUTEX(m)			struct mutex m = MUTEX_UNLOCKED(#m)
+#define mutex_init(m)			do { *(m) = MUTEX_UNLOCKED(#m); } while (0)
+#define mutex_destroy(m)		pthread_mutex_destroy(&(m)->lock)
 
 static inline void
-spin_lock_assert_holding(spinlock_t * lock)
+mutex_assert_holding(mutex_t * lock)
 {
 #ifdef UMC_LOCK_CHECKS
-    assert(lock);
-    verify_eq(sys_thread_current(), lock->owner, "%s expected to own lock '%s' owned instead by %s taken at %s",
-	      sys_thread_name(sys_thread_current()), lock->name, sys_thread_name(lock->owner), lock->whence);
+    verify_eq(sys_thread_current(), lock->owner,
+		"%s expected to own lock '%s' owned instead by %s taken at %s",
+		sys_thread_name(sys_thread_current()), lock->name,
+		sys_thread_name(lock->owner), lock->last_locker);
 #endif
 }
 
-//XXX yuck, these are used on mutex locks too
 #ifdef UMC_LOCK_CHECKS
-#define SPINLOCK_CLAIM(lock)	verify_eq((lock)->owner, NULL); (lock)->owner = sys_thread_current();
-#define SPINLOCK_DISCLAIM(lock)	spin_lock_assert_holding(lock); (lock)->owner = NULL;
+
+#define UMC_LOCK_CLAIM(lock, whence) do { \
+    verify_eq((lock)->owner, NULL); \
+    (lock)->owner = sys_thread_current(); \
+    (lock)->last_locker = whence; \
+    lock_trace("'%s' (%u) at %s takes lock %s (@%p)", \
+	  sys_thread_name(sys_thread_current()), sys_thread_num(sys_thread_current()), \
+	  whence, lock->name, lock); \
+} while (0)
+
+#define UMC_LOCK_DISCLAIM(lock, whence) do { \
+    lock_trace("'%s' (%u) at %s drops lock %s (@%p)", \
+	  sys_thread_name(sys_thread_current()), sys_thread_num(sys_thread_current()), \
+	  whence, lock->name, lock); \
+    mutex_assert_holding(lock); \
+    (lock)->owner = NULL; \
+} while (0)
+
 #else
-#define SPINLOCK_CLAIM(lock)	DO_NOTHING()
-#define SPINLOCK_DISCLAIM(lock)	DO_NOTHING()
+
+#define UMC_LOCK_CLAIM(lock, whence) \
+    lock_trace("'%s' (%u) at %s takes lock %s (@%p)", \
+	  sys_thread_name(sys_thread_current()), sys_thread_num(sys_thread_current()), \
+	  whence, lock->name, lock); \
+
+#define UMC_LOCK_DISCLAIM(lock, whence) \
+    lock_trace("'%s' (%u) at %s drops lock %s (@%p)", \
+	  sys_thread_name(sys_thread_current()), sys_thread_num(sys_thread_current()), \
+	  whence, lock->name, lock); \
+
 #endif
 
-/* Returns true if lock acquired, else false */
-#define spin_lock_try(lock)		_spin_lock_try((lock), FL_STR)
+/* Try to acquire a mutex lock -- returns true if lock acquired, false if not */
+#define mutex_trylock(lock)		(_mutex_trylock((lock), FL_STR) == E_OK)
+
+/* Returns E_OK if lock acquired */
 static inline error_t
-_spin_lock_try(spinlock_t * lock, sstring_t whence)
+_mutex_trylock(mutex_t * lock, sstring_t whence)
 {
-    error_t err = pthread_mutex_trylock(&lock->plock);
+    error_t err = pthread_mutex_trylock(&lock->lock);
     if (unlikely(err != 0)) {
-#ifdef UMC_LOCK_CHECKS
-	if (err == EBUSY) {
-	    verify(lock->owner != sys_thread_current(),
-		"Thread %d ('%s') attempts to acquire a spinlock '%s' (%p) it already holds (%p) taken at %s",
-		sys_thread_current()->tid, sys_thread_name(sys_thread_current()),
-		lock->name, lock, lock->owner, lock->whence);
-	} else
+	if (err != EBUSY)
 	    sys_warning("Error %s (%d) on pthread_mutex_trylock(%s) from %s",
 		    strerror(err), err, lock->name, whence);
-#endif
-	return false;
+	return err;
     }
-    /* Successfully acquired lock */
-    SPINLOCK_CLAIM(lock);
-    lock->whence = whence;
-    lock_trace("'%s' (%u) takes spinlock %s at %p",
-	  sys_thread_name(sys_thread_current()), sys_thread_num(sys_thread_current()),
-	  lock->name, lock);
-    return true;
+    UMC_LOCK_CLAIM(lock, whence);
+    return E_OK;
 }
 
-#define spin_lock(lock)		_spin_lock((lock), FL_STR)
+/* Avoid a pair of context switches when wait time is short */
+static inline error_t
+_mutex_tryspin(mutex_t * lock, sstring_t whence)
+{
+    #define MUTEX_SPINS 100	/* Try this many spins before resorting to context switch */
+    uint32_t spins = MUTEX_SPINS;
+    while (spins--) {
+	error_t err;
+	if (likely((err = _mutex_trylock(lock, whence)) == E_OK))
+	    return E_OK;	/* got the lock */
+#ifdef UMC_LOCK_CHECKS
+	verify(lock->owner != sys_thread_current(),
+	    "Thread %d ('%s') attempts to acquire a lock '%s' (@%p) "
+	    "it already holds (%p) taken at %s",
+	    sys_thread_current()->tid, sys_thread_name(sys_thread_current()),
+	    lock->name, lock, lock->owner, lock->last_locker);
+#endif
+	_SPINWAITING();
+    }
+    return -EBUSY;
+}
+
+/* Acquire a mutex lock */
+#define mutex_lock(lock)		_mutex_lock((lock), FL_STR)
+static inline void
+_mutex_lock(mutex_t * lock, sstring_t whence)
+{
+    error_t err = _mutex_tryspin(lock, whence);
+    if (err == E_OK)
+	return;
+    /* We exhausted the time we're willing to spinwait -- give up the CPU */
+    pthread_mutex_lock(&lock->lock);	/* sleep */
+    UMC_LOCK_CLAIM(lock, whence);
+}
+
+/* Returns E_OK if mutex acquired; otherwise -EINTR on signal */
+#define mutex_lock_interruptible(lock)	_mutex_lock_interruptible((lock), FL_STR)
+/* _mutex_lock_interruptible() is down below where we know how to check for signals */
+
+static inline void
+mutex_unlock(mutex_t * lock)
+{
+    UMC_LOCK_DISCLAIM(lock, whence);
+    pthread_mutex_unlock(&lock->lock);
+}
+
+/* Use of this function is inherently racy */
+static inline bool
+mutex_is_locked(mutex_t * lock)
+{
+    if (unlikely(!mutex_trylock(lock))) {
+	return true;	/* we couldn't get the mutex, therefore it is locked */
+    }
+    mutex_unlock(lock);    /* unlock the mutex we just locked to test it */
+    return false;	/* We got the mutex, therefore it was not locked */
+}
+
+/*** Mutex SPIN lock ***/
+/* Implemented using a pthread_mutex and _trylock(), so it can work with pthread_cond_t */
+typedef mutex_t				spinlock_t;
+#define SPINLOCK_UNLOCKED(m)		{ .lock = PTHREAD_MUTEX_INITIALIZER, .name = #m }
+#define DEFINE_SPINLOCK(lock)		DEFINE_MUTEX(lock)
+#define spin_lock_init(lock)		mutex_init(lock)
+#define spin_lock_destroy(lock)		(no one ever destroys a spinlock)
+
+#define assert_spin_locked(lock)	mutex_assert_holding(lock)
+#define spin_lock_assert_holding(lock)	mutex_assert_holding(lock)
+#define spin_lock_try(lock)		mutex_trylock(lock)
+
+/* Unlike _mutex_lock, this function only spins on _trylock(), never sleeps */
+#define spin_lock(lock)			_spin_lock((lock), FL_STR)
 static inline void
 _spin_lock(spinlock_t * lock, sstring_t whence)
 {
-    while (!_spin_lock_try(lock, whence)) _SPINWAITING();
+    error_t err;
+    while ((err = _mutex_trylock(lock, whence)) != E_OK) {
+#ifdef UMC_LOCK_CHECKS
+	verify(lock->owner != sys_thread_current(),
+	    "Thread %d ('%s') attempts to acquire a lock '%s' (@%p) "
+	    "it already holds (%p) taken at %s",
+	    sys_thread_current()->tid, sys_thread_name(sys_thread_current()),
+	    lock->name, lock, lock->owner, lock->last_locker);
+#endif
+	_SPINWAITING();
+    }
 }
 
-//XXX spin_lock_nested() support: change the pthread lock type to RECURSIVE ?
-#define spin_lock_nested(lock, subclass)    UMC_STUB(spin_lock_nested) //XXXXXX
+#define NEST_LOCK(lock)			UMC_spin_lock(&(lock)->nest_lock)
+#define NEST_UNLOCK(lock)		UMC_spin_unlock(&(lock)->nest_lock)
 
+/* Unlock a spinlock */
+#define spin_unlock(lock)		_spin_unlock(lock, FL_STR)
 static inline void
-spin_unlock(spinlock_t * lock)
+_spin_unlock(spinlock_t * lock, sstring_t whence)
 {
-    lock_trace("'%s' (%u) drops spinlock %s at %p",
-	  sys_thread_name(sys_thread_current()), sys_thread_num(sys_thread_current()),
-	  rw->name, rw);
-    SPINLOCK_DISCLAIM(lock);
-    pthread_mutex_unlock(&lock->plock);
+    NEST_LOCK(lock);
+    int nest = atomic_get(&lock->nest);
+    if (nest)
+	atomic_dec(&lock->nest);
+    NEST_UNLOCK(lock);
+
+    if (!nest)
+	mutex_unlock(lock);
 }
+
+/* Takes a spinlock even if it is already held */
+#define spin_lock_nested(lock, subclass)    _spin_lock_nested((lock), (subclass), FL_STR)
+static inline void
+_spin_lock_nested(spinlock_t * lock, int subclass, sstring_t whence)
+{
+    /* First try hard for a legitimate take of the lock */
+    if (_mutex_tryspin(lock, whence) != E_OK) {
+	/* Didn't get the lock */
+	NEST_LOCK(lock);
+	/* Try once more and set lock->nest if we can't get it */
+	if (_mutex_trylock(lock, whence) != E_OK)
+	    atomic_inc(&lock->nest);
+	NEST_UNLOCK(lock);
+    }
+}
+
+extern int _atomic_dec_and_lock(atomic_t * atomic, spinlock_t * lock);
+#define atomic_dec_and_lock(atomic, lock) _atomic_dec_and_lock(atomic, lock)
 
 /* Lock by itself should suffice */
-#define spin_lock_bh			spin_lock
-#define spin_lock_irq			spin_lock
+#define spin_lock_bh(lock)		spin_lock(lock)
+#define spin_lock_irq(lock)		spin_lock(lock)
 #define spin_lock_irqsave(lock, save)	do { _USE(save); spin_lock(lock); } while (0)
 
 #define spin_lock_bh_assert_holding(l)	spin_lock_assert_holding(l)
@@ -1201,119 +1328,6 @@ spin_unlock(spinlock_t * lock)
 #define spin_unlock_bh(lock)		spin_unlock(lock)
 #define spin_unlock_irq(lock)		spin_unlock(lock)
 #define spin_unlock_irqrestore(lock, save)  spin_unlock(lock)
-
-/*** Sleepable mutex lock ***/
-typedef struct mutex {
-    sys_thread_t               volatile owner;	/* the exclusive holder */
-    pthread_mutex_t		        lock;
-    sstring_t				name;
-    sstring_t				whence;	/* FILE:LINE of last locker */
-    //XXX add some mutex stats
-} mutex_t;
-
-#define MUTEX_UNLOCKED(mname)		((struct mutex){ .lock = PTHREAD_MUTEX_INITIALIZER, .name = #mname })
-#define DEFINE_MUTEX(m)			struct mutex m = MUTEX_UNLOCKED(#m)
-#define mutex_init(m)			do { *(m) = MUTEX_UNLOCKED(#m); } while (0)
-#define mutex_destroy(m)		pthread_mutex_destroy(&(m)->lock)
-
-static inline void
-mutex_assert_holding(mutex_t * m)
-{
-#ifdef UMC_LOCK_CHECKS
-    verify_eq(sys_thread_current(), m->owner, "%s expected to own mutex '%s' owned instead by %s taken at %s",
-	      sys_thread_name(sys_thread_current()), m->name, sys_thread_name(m->owner), m->whence);
-#endif
-}
-
-/* Try to acquire a mutex lock -- returns true if lock acquired, false if not */
-#define mutex_trylock(m)		_mutex_trylock((m), FL_STR)
-static inline error_t
-_mutex_trylock(mutex_t * m, sstring_t whence)
-{
-    if (unlikely(pthread_mutex_trylock(&m->lock))) {
-	/* Can't get the lock because it is held by somebody */
-	return false;
-    }
-#ifdef UMC_LOCK_CHECKS
-    verify_eq(m->owner, NULL);
-    m->owner = sys_thread_current();
-#endif
-    m->whence = whence;
-    lock_trace("'%s' (%u) at %s acquires mutex '%s' (%p)",
-	  sys_thread_name(m->owner), sys_thread_num(m->owner), whence, m->name, m);
-    return true;
-}
-
-/* Acquire a mutex lock -- attempt to avoid a context switch when wait time is short */
-#define mutex_lock(m)			_mutex_lock((m), FL_STR)
-static inline void
-_mutex_lock(mutex_t * m, sstring_t whence)
-{
-    #define MUTEX_SPINS 100	/* Try this many spins before resorting to context switch */
-    uint32_t spins = MUTEX_SPINS;
-    while (--spins) {
-	if (likely(_mutex_trylock(m, whence))) {
-	    return;	/* got the lock */
-	}
-#ifdef UMC_LOCK_CHECKS
-	verify(m->owner != sys_thread_current(),
-		"Thread attempts to acquire a mutex it already holds, taken at %s", m->whence);
-#endif
-	_SPINWAITING();
-    }
-
-    /* We exhausted the time we're willing to spinwait -- give up the CPU */
-#if 0	    // mutex wait time measurements
-#if !OPTIMIZED
-    sys_time_t const t_start = sys_time_now();
-#endif
-#endif
-    /*** SLEEP ***/
-    pthread_mutex_lock(&m->lock);
-//XXXXX Use  pthread_mutex_timedlock(pthread_mutex_t *, struct timespec *);
-//XXXXX	     with a check_interval to implement mutex_lock_interruptible()
-
-    /*** AWAKE ***/
-#ifdef UMC_LOCK_CHECKS
-    verify_eq(m->owner, NULL);
-    m->owner = sys_thread_current();
-#endif
-
-#if 0	    // mutex wait time measurements
-#if !OPTIMIZED
-    sys_time_t const t_delta = sys_time_now() - t_start;
-    trace("'%s' (%u) at %s acquires mutex '%s' (%p) after sleeping %"PRIu64" ns",
-	  sys_thread_name(m->owner), sys_thread_num(m->owner), whence, m->name, m, t_delta);
-#else
-    trace("'%s' (%u) at %s acquires mutex '%s' (%p) after sleeping",
-	  sys_thread_name(sys_thread_current()),
-	  sys_thread_num(sys_thread_current()), whence, m->name, m);
-#endif
-#endif
-}
-
-#define mutex_lock_interruptible(m)	(mutex_lock(m), E_OK)	//XXXXX
-
-static inline void
-mutex_unlock(mutex_t * m)
-{
-    mutex_assert_holding(m);
-    lock_trace("'%s' (%u) drops mutex '%s' (%p)",
-	  sys_thread_name(m->owner), sys_thread_num(m->owner), m->name, m);
-    m->owner = NULL;
-    pthread_mutex_unlock(&m->lock);
-}
-
-/* Use of this function is inherently racy */
-static inline bool
-mutex_is_locked(mutex_t * m)
-{
-    if (unlikely(!mutex_trylock(m))) {
-	return true;	/* we couldn't get the mutex, therefore it is locked */
-    }
-    mutex_unlock(m);    /* unlock the mutex we just locked to test it */
-    return false;	/* We got the mutex, therefore it was not locked */
-}
 
 /*** Sleepable semaphore ***/
 
@@ -1369,8 +1383,8 @@ UMC_down_trylock(struct semaphore * sem, sstring_t whence)
 
 /* Lock dependency checks */
 /* Note: this macro gets invoked on both mutex locks and spin locks */
-#define lockdep_assert_held(m)		assert_eq(sys_thread_current(), (m)->owner)
-#define lockdep_is_held(m)		lockdep_assert_held(m)
+#define lockdep_assert_held(lock)		assert_eq(sys_thread_current(), (lock)->owner)
+#define lockdep_is_held(lock)		lockdep_assert_held(lock)
 
 /* Lockdep not implemented */
 struct lock_class_key { };
@@ -1876,13 +1890,50 @@ _flush_signals(struct task_struct * task, sstring_t caller_id)
 
 /*** Waiting ***/
 
-/* The WAITQ_CHECK_INTERVAL is a hack to allow checking for unwoken events like signals.  Note
- * that pthread_cond_timedwait() does not return EINTR, so signals do not interrupt it.  We wake
+/* The SIGNAL_CHECK_INTERVAL is a hack to allow checking for unwoken events like signals.  Note
+ * that pthread_cond_timedwait() never returns EINTR, so signals do not interrupt it.  We wake
  * up to recheck the COND each time interval, even if no wakeup has been sent; so that interval
  * is the maximum delay between an unwoken event and the thread noticing it.
  * XXXX fix so that we can wake them up
  */
-#define WAITQ_CHECK_INTERVAL	sys_time_delta_of_ms(150)   /* signal check interval */
+#define SIGNAL_CHECK_INTERVAL	sys_time_delta_of_ms(150)   /* signal check interval */
+
+/* Returns E_OK if mutex acquired; otherwise -EINTR on signal */
+static inline error_t
+_mutex_lock_interruptible(mutex_t * lock, sstring_t whence)
+{
+    error_t err = _mutex_tryspin(lock, whence);
+    if (err == E_OK)
+	return E_OK;	    /* got it */
+
+    /* We exhausted the time we're willing to spinwait -- give up the CPU */
+    /* But check for signals once in a while */
+    while (true) {
+	if (signal_pending(current))
+	    return -EINTR;		/* wait ends due to signal */
+
+	sys_time_t now = sys_time_now();
+	sys_time_t next_check = now + SIGNAL_CHECK_INTERVAL;
+	struct timespec const ts_end = {
+		.tv_sec = sys_time_delta_to_sec(next_check),
+		.tv_nsec = sys_time_delta_mod_sec(next_check)
+	};
+
+	err = pthread_mutex_timedlock(&lock->lock, &ts_end);
+	if (err == 0)
+	    break;			/* got it */
+	if (err == ETIMEDOUT)
+	    continue;			/* check again for signals */
+
+	sys_warning("pthread_mutex_timedlock(%s) by %s (%d) at %s returns error=%d",
+		lock->name,
+		sys_thread_name(sys_thread_current()), sys_thread_num(sys_thread_current()),
+		whence, err);
+    }
+
+    UMC_LOCK_CLAIM(lock, whence);
+    return E_OK;
+}
 
 /* Await a wakeup for a limited time.
  * Called to check if done waiting and/or wait when COND has evaluated false.
@@ -1912,10 +1963,10 @@ _UMC_wait_locked(wait_queue_head_t * wq,
     if (current->state != TASK_UNINTERRUPTIBLE && signal_pending(current))
 	return true;	/* wait ends due to signal */
 
-    if (time_after(now + WAITQ_CHECK_INTERVAL, t_end))
+    if (time_after(now + SIGNAL_CHECK_INTERVAL, t_end))
 	next_check = t_end;
     else
-	next_check = now + WAITQ_CHECK_INTERVAL;
+	next_check = now + SIGNAL_CHECK_INTERVAL;
 
     struct timespec const ts_end = {
 		.tv_sec = sys_time_delta_to_sec(next_check),
@@ -1924,11 +1975,11 @@ _UMC_wait_locked(wait_queue_head_t * wq,
 
     if (innerlockp)
 	spin_unlock(innerlockp);
-    SPINLOCK_DISCLAIM(lockp);	    /* cond_wait drops LOCK */
+    UMC_LOCK_DISCLAIM(lockp, FL_STR);	/* cond_wait drops LOCK */
 
-    pthread_cond_timedwait(&wq->pcond, &(lockp)->plock, &ts_end);
+    pthread_cond_timedwait(&wq->pcond, &(lockp)->lock, &ts_end);
 
-    SPINLOCK_CLAIM(lockp);	    /* cond_wait reacquires LOCK */
+    UMC_LOCK_CLAIM(lockp, FL_STR);	/* cond_wait reacquires LOCK */
     if (innerlockp)
 	spin_lock(innerlockp);
 
@@ -2544,7 +2595,7 @@ struct workqueue_struct {
     struct wait_queue_head	    wake;
     struct wait_queue_head	    flushed;
     bool		   volatile is_idle;
-    atomic_t		   volatile is_flushing;
+    atomic_t			    is_flushing;
     char			    name[64];
 };
 
@@ -2653,6 +2704,7 @@ extern spinlock_t UMC_pagelist_lock;
 #define vmalloc_to_page(addr)		virt_to_page(addr)
 #define offset_in_page(addr)		virt_to_page_ofs(addr)
 
+#define virt_to_page_addr(addr)		((struct page *)((uintptr_t)(addr) & PAGE_MASK))
 #define virt_to_page_ofs(addr)		((size_t)((uintptr_t)(addr) & ~PAGE_MASK))
 
 /* Ugh.  Search down the page list to find the one containing the specified addr */
@@ -3327,7 +3379,7 @@ struct gendisk {
 #define disk_to_bdev(disk)		((disk)->bdev)
 
 extern struct list_head UMC_disk_list;
-extern struct spinlock UMC_disk_list_lock;
+extern spinlock_t UMC_disk_list_lock;
 
 extern const char * UMC_fuse_mount_point;   /* e.g. "/UMCfuse" */
 
@@ -3734,6 +3786,8 @@ bio_add_page(struct bio * bio, struct page * page, unsigned int len, unsigned in
 #define bio_add_pc_page(q, bio, page, bytes, ofs) \
 					bio_add_page((bio), (page), (bytes), (ofs))
 
+/* Compatibility macros in DRBD too complicated to explain here, but */
+/* Don't waste time trying to merge these next ones. */
 static inline error_t
 submit_bio(int rw, struct bio * bio)
 {
@@ -3748,6 +3802,18 @@ _submit_bio(struct bio * bio)
 }
 
 #define generic_make_request(bio)	_submit_bio(bio)
+
+//XXXXX Figure out how this connection is made in a real kernel
+static inline void
+UMC_link_disk_to_bdev(struct gendisk * disk, struct block_device * bdev)
+{
+    disk_to_bdev(disk) = bdev;
+    disk_to_bdev(disk)->bd_disk = disk;
+    disk_to_bdev(disk)->bd_inode->i_mode = S_IFBLK | (false ? 0440 : 0660);   //XXXX
+
+    /* Create the device node in the fuse tree */
+    UMC_fuse_bdev_add(disk->disk_name, disk_to_bdev(disk)->bd_inode);
+}
 
 struct bio_set				{ };	    /* bio_set not implemented */
 #define BIO_POOL_SIZE			IGNORED	    /* bio_set */
