@@ -1,36 +1,49 @@
 # usermode_compat/src/Makefile
 # Makefile for usermode compatibility for Linux kernel source code
-# Imports optional SYS_SERVICE_INCL, CFLAGS, MY_CFLAGS, EXTRA_CFLAGS, REF_KERNEL
+# Imports optional
+#   REF_KERNEL		path to reference kernel source
+#   TCMUR_SRC		path to tcmu-runner source
+#   SYS_SERVICE_INCL	path to MTE/include source (if not installed in /usr/include)
+#   CFLAGS
+#   MY_CFLAGS
+#   EXTRA_CFLAGS
 
-ifndef REF_KERNEL
-### Place to get real kernel header files (preferably of the level being emulated)
-# REF_KERNEL := /usr/src/linux-headers-$(shell uname -r | sed -e s/-generic//)
-REF_KERNEL := $(shell /bin/pwd)/../../linux-2.6.32.27
-endif
-
-MY_CFLAGS += -DDEBUG
+##MY_CFLAGS += -DDEBUG
 # MY_CFLAGS += -fsanitize=undefined
 # MY_CFLAGS += -DNDEBUG
 
 # MY_CFLAGS += -DTRACE_TRACE
 # MY_CFLAGS += -DTRACE_VERBOSE
 
-MY_CFLAGS += -O0
+##MY_CFLAGS += -O0
 # MY_CFLAGS += -Og
 # MY_CFLAGS += -O1
 # MY_CFLAGS += -O2
 # MY_CFLAGS += -O3
 
 # disable most of the memory checks remaining when !DEBUG
-MY_CFLAGS += -DOPTIMIZED
+# MY_CFLAGS += -DOPTIMIZED
 
 # VALGRIND enables memory initialization; NVALGRIND disables all valgrind checks
 # MY_CFLAGS += -DVALGRIND -DARENA_DISABLE=1
 # MY_CFLAGS += -DNVALGRIND
 
+ifndef MY_SRC
+MY_SRC = $(CURDIR)/../..
+endif
+
+ifndef REF_KERNEL
+### Place to get real kernel source files of the level being emulated
+REF_KERNEL := $(MY_SRC)/linux-2.6.32.27
+endif
+
 ifndef SYS_SERVICE_INCL
 ### Place to get mtelib.h and sys_service.h (et. al.), if not in /usr/include
-SYS_SERVICE_INCL=../../MTE/include
+SYS_SERVICE_INCL=$(MY_SRC)/MTE/include
+endif
+
+ifndef TCMUR_SRC
+TCMUR_SRC = $(MY_SRC)/tcmu-runner
 endif
 
 MY_CFLAGS += -I$(SYS_SERVICE_INCL)
@@ -89,15 +102,41 @@ MY_CFLAGS += $(WFLAGS_WARN) $(WFLAGS_INHIBIT)
 
 SHELL=/bin/bash
 
-MY_CFLAGS += -g -ggdb -fno-omit-frame-pointer -D_GNU_SOURCE -fPIC -I. -isystem ./arch/x86/include -isystem include
+LIBTCMUR = $(TCMUR_SRC)/libtcmur
 
-SRCS_D = usermode_lib.c UMC_fuse.c
+# Use the fuse/tcmu-runner logic in the tcmu-runner repository
+OBJS_LIBTCMUR += $(LIBTCMUR)/fuse_tree.o
+OBJS_LIBTCMUR += $(LIBTCMUR)/fuse_tcmur.o
+OBJS_LIBTCMUR += $(LIBTCMUR)/fuse_tcmur_ctl.o
+OBJS_LIBTCMUR += $(LIBTCMUR)/libtcmur.o
+OBJS_LIBTCMUR += $(LIBTCMUR)/simple_log.o
+
+# The usermode compatibility sources
+SRCS_D += usermode_lib.c
+SRCS_D += UMC_bio.c
+SRCS_D += UMC_fuse_proc.c
+SRCS_D += UMC_netlink.c
+SRCS_D += UMC_socket.c
+SRCS_D += UMC_sys.c
+SRCS_D += UMC_thread.c
+SRCS_D += UMC_fuse_bio.c
+SRCS_D += UMC_bio_tcmur.c
+
+MY_CFLAGS += -g -ggdb -fno-omit-frame-pointer -fPIC -I. -isystem ./arch/x86/include -isystem include
+
+MY_CFLAGS += -I$(TCMUR_SRC) -I$(TCMUR_SRC)/ccan -I$(LIBTCMUR)
+
 OBJS_D = $(SRCS_D:.c=.o)
 
 all:	check_kcopy check_MTE
 	$(MAKE) cscope
-	$(MAKE) .depend
-	$(MAKE) $(OBJS_D)
+	$(MAKE) usermode_lib.a
+
+usermode_lib.a: .depend $(OBJS_D) $(OBJS_LIBTCMUR)
+	$(LD) -d -z now -O 1 -E -r -o $@ $(OBJS_D) $(OBJS_LIBTCMUR)
+
+$(OBJS_LIBTCMUR):
+	$(MAKE) -C $(LIBTCMUR)
 
 check_kcopy:
 	@if [[ ! -d include ]] ; then $(MAKE) kcopy; fi
@@ -119,7 +158,7 @@ endif
 	$(CC) -M $(CFLAGS) $(MY_CFLAGS) $(EXTRA_CFLAGS) $(SRCS_D) > $@
 
 clean:
-	rm -f *.o .depend
+	rm -f *.o *.a *.so .depend
 	rm -f tags cscope.out
 
 extraclean: clean

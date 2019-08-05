@@ -3,6 +3,8 @@
  */
 #ifndef UMC_KERNEL_H
 #define UMC_KERNEL_H
+#include <sys/types.h>		// size_t
+#include <inttypes.h>		// uint32_t
 
 /*** linux/version.h ***/
 
@@ -99,9 +101,9 @@ typedef unsigned short sa_family_t;
 #define SO_RCVBUFFORCE  33
 
 struct ucred {
-        __u32   pid;
-        __u32   uid;
-        __u32   gid;
+        uint32_t   pid;
+        uint32_t   uid;
+        uint32_t   gid;
 };
 
 #define MSG_DONTROUTE   4
