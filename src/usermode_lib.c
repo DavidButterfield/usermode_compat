@@ -7,7 +7,7 @@
 #include "fuse_tree.h"
 #include "libtcmur.h"
 #include "UMC_fuse_proc.h"
-#include <ctype.h>   //XXX
+#include <ctype.h>
 
 static error_t
 event_task_run(void * event_task)

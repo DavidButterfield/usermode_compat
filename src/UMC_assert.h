@@ -41,7 +41,7 @@
 
 #define assert_static(e) ;enum { _CONCAT(static_assert_, __COUNTER__) = 1/(!!(e)) }
 
-//XXX Avoid expect(x) because DRBD has its own version; use expect_ne(x, 0) instead.
+// Avoid expect(x) because DRBD has its own version; use expect_ne(x, 0) instead
 #ifdef DEBUG
 #define expect_rel(x, op, y, fmtargs...)    _expect_rel((x), op, (y), ""fmtargs)
 #define expect_imply(x, y, fmtargs...)	    _expect_imply((x), (y), ""fmtargs)

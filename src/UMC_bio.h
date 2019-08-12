@@ -139,7 +139,7 @@ struct block_device;
 struct block_device_operations {
     struct module *owner;
     int (*open) (struct block_device *, fmode_t);
-    void (*release) (struct gendisk *, fmode_t);
+    int (*release) (struct gendisk *, fmode_t);
     // int (*rw_page)(struct block_device *, sector_t, struct page *, bool);
     // int (*ioctl) (struct block_device *, fmode_t, unsigned, unsigned long);
     // int (*compat_ioctl) (struct block_device *, fmode_t, unsigned, unsigned long);
@@ -213,6 +213,8 @@ struct block_device {
 
 #define bdev_read_only(bdev)		((bdev)->bd_disk->part0.policy != 0)
 
+extern int blkdev_put(struct block_device *bdev, fmode_t fmode);
+
 /* Take another reference on the bdev */
 static inline struct block_device *
 bdgrab(struct block_device * bdev)
@@ -236,6 +238,7 @@ extern struct block_device * bdget(dev_t devt);
 #define fsync_bdev(bdev)		fsync((bdev)->bd_inode->UMC_fd)	//XXXXX bogus
 
 extern struct block_device * _open_bdev(const char *path, fmode_t fmode);
+extern int _close_bdev(struct block_device * bdev, fmode_t fmode);
 
 extern struct block_device * open_bdev_exclusive(const char * path, fmode_t, void * holder);
 extern void close_bdev_exclusive(struct block_device * bdev, fmode_t);
@@ -367,7 +370,7 @@ static inline bool bio_rw_flagged(struct bio *bio, enum bio_rw_flags flag)
 
 #define BIO_MAX_PAGES			1024
 
-#define UMC_bio_op(bio)			((bio)->bi_rw)	//XXX ?
+#define UMC_bio_op(bio)			((bio)->bi_rw)	//XXXXX ?
 #define op_is_sync(op)			(((op) & (1<<BIO_RW_BARRIER)) != 0)
 #define op_is_write(op)			(((op) & (1<<BIO_RW)) != 0)
 #define bio_data_dir(bio)		(op_is_write(UMC_bio_op(bio)) ? WRITE : READ)
@@ -387,6 +390,8 @@ blk_rq_pos(const struct request *rq)
     return rq->bio ? rq->bio->bi_sector : 0;
 }
 
+struct bio_set;
+extern void bio_free(struct bio *bio, struct bio_set *bs);
 extern void bio_destructor(struct bio *);
 
 #define bio_get(bio)			atomic_inc(&(bio)->bi_cnt)
@@ -507,7 +512,7 @@ blk_mq_rq_to_pdu(struct request *rq)
 
 #define BDEVNAME_SIZE		32	/* Largest string for a blockdev identifier */
 
-#define blkdev_issue_flush(bdev, x)		fsync_bdev(bdev)    //XXXX right?
+#define blkdev_issue_flush(bdev, x)		fsync_bdev(bdev)    //XXXXX right?
 
 /******************************************************************************/
 
@@ -536,16 +541,19 @@ struct blk_plug { };
 #define blk_finish_plug(a)		DO_NOTHING()	    /* no plug */
 #define blk_start_plug(a)		DO_NOTHING()	    /* no plug */
 
-/* Add request to queue for execution */
+/* Add request to queue for execution (unused) */
 #define blk_execute_rq_nowait(q, disk, rq, at_head, done_fn) \
-	    UMC_STUB(blk_execute_rq_nowait);	    //XXXX unused?
+	    UMC_STUB(blk_execute_rq_nowait);
 
 #define register_blkdev(major, name)		0
 #define unregister_blkdev(major, name)		DO_NOTHING()
 
 #define blkdev_issue_discard(bdev, sector, nr_sects, gfp, flags)    (-EOPNOTSUPP)
 
-#define bd_link_disk_holder(a, b)	0		//XXX sysfs
-#define bd_unlink_disk_holder(a, b)	DO_NOTHING()	//XXX sysfs
+#define bd_link_disk_holder(a, b)	0			//XXX
+#define bd_unlink_disk_holder(a, b)	DO_NOTHING()		//XXX
+
+#define bd_claim_by_disk(bde, claim_ptr, vdisk)	0		//XXX
+#define bd_release_from_disk(bde, vdisk)	DO_NOTHING()	//XXX
 
 #endif /* UMC_BIO_H */

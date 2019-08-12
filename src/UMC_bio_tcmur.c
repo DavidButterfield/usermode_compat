@@ -207,9 +207,10 @@ bio_tcmur_open(struct block_device * bdev, fmode_t fmode)
     return 0;
 }
 
-static void
+static int
 bio_tcmur_release(struct gendisk * disk, fmode_t fmode)
 {
+    return 0;
 }
 
 struct block_device_operations bio_tcmur_ops = {

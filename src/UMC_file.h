@@ -19,7 +19,7 @@
 #define S_IWUGO				(S_IWUSR|S_IWGRP|S_IWOTH)
 
 struct file {
-//  struct kref			kref;		//XXX struct file
+//  struct kref			kref;		//XXX struct file not kref'd
     void		      * private_data;	/* e.g. seq_file */
     struct inode	      * inode;
     fmode_t			f_openmode;
@@ -200,7 +200,7 @@ static inline void
 filp_close_bdev(struct file * file)
 {
     assert_eq(file->inode->UMC_type, I_TYPE_BDEV);
-    close_bdev_exclusive(BDEV_I(file->inode), file->f_openmode);
+    _close_bdev(BDEV_I(file->inode), file->f_openmode);
     record_free(file);
 }
 
@@ -237,7 +237,7 @@ struct dentry {
     struct inode	      * d_inode;
 };
 
-#define d_unhashed(dentry)		true	//XXXX
+#define d_unhashed(dentry)		true	//XXXX ?
 
 struct nameidata;
 

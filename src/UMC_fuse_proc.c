@@ -135,7 +135,7 @@ fuse_modparm_read(uintptr_t varloc_arg, void * buf, size_t iosize, off_t ofs)
 	return 0;	    //XXX good enough?
 
     memcpy(&data, varloc->addr, varloc->size);
-    //XXXX big endian?  data = data >> (8 * ((sizeof(data) - varloc->size)));
+    //XXXXX big endian?  data = data >> (8 * ((sizeof(data) - varloc->size)));
     
     size_t nchar = snprintf(buf, iosize, "%lld\n", data);
     if (nchar > iosize)
@@ -166,7 +166,7 @@ fuse_modparm_write(uintptr_t varloc_arg, const char * buf, size_t iosize, off_t 
 	return -errno;
     }
 
-    //XXXX big endian?  data = data << (8 * ((sizeof(data) - varloc->size)));
+    //XXXXX big endian?  data = data << (8 * ((sizeof(data) - varloc->size)));
     memcpy(varloc->addr, &data, varloc->size);
     
     return (ssize_t)iosize;
@@ -244,7 +244,7 @@ static int
 fuse_thread_run(void * unused)
 {
     assert_eq(unused, NULL);
-    verify_ne(UMC_FUSE_THREAD, NULL);
+    verify(UMC_FUSE_THREAD);
     trace_fuse_thread("UMC_fuse thread starts on tid=%u", current->pid);
 
     error_t err = fuse_loop_run(unused);
@@ -265,7 +265,7 @@ fuse_thread_start(void)
     if (IS_ERR(fuse_thr))
 	return PTR_ERR(fuse_thr);
 
-    set_user_nice(fuse_thr, nice(0) - 10);	//XXXX
+    set_user_nice(fuse_thr, nice(0) - 10);	//XXXX TUNE
 
     kthread_start(fuse_thr);
     return 0;

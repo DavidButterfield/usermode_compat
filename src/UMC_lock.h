@@ -10,7 +10,7 @@
 
 #ifndef UMC_LOCK_H
 #define UMC_LOCK_H
-#include <stddef.h>	// container_of, offsetof   //XXX extract
+#include <stddef.h>	// container_of, offsetof   //XXX
 #include <pthread.h>	//XXXXXX remove after fixing to use sys_mutex, not pthread_mutex
 #include <semaphore.h>	//XXX could move this to .c file
 
@@ -205,6 +205,17 @@ rwlock_drop(rwlock_t * rw, unsigned int ndrop)
 /* Lock alone should suffice because the usermode softirq thread is never (virtually) "local" */
 #define write_lock_bh(rw)		write_lock(rw)
 #define write_unlock_bh(rw)		write_unlock(rw)
+
+/* Lock alone should suffice here in usermode */
+#define read_lock_irq(rw)		read_lock(rw)
+#define read_unlock_irq(rw)		read_unlock(rw)
+#define read_lock_irqsave(rw, irq)	read_lock(rw)
+#define read_unlock_irqrestore(rw, irq)	do { _USE(irq); read_unlock(rw); } while (0)
+
+#define write_lock_irq(rw)		write_lock(rw)
+#define write_unlock_irq(rw)		write_unlock(rw)
+#define write_lock_irqsave(rw, irq)	write_lock(rw)
+#define write_unlock_irqrestore(rw, irq) do { _USE(irq); write_unlock(rw); } while (0)
 
 /*** Sleepable mutex lock -- also used for spinlock mutex using _trylock() ***/
 

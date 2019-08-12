@@ -96,7 +96,7 @@ _fuse_bio_io(struct block_device * bdev, void * buf, size_t iosize, off_t ofs, i
 	init_completion(&c);
 	bio->bi_private = (void *)&c;
 
-	ret = submit_bio(rwf, bio); //XXX
+	ret = submit_bio(rwf, bio);
 	if (!ret) {
 	    wait_for_completion(&c);
 	    ret = bio->bi_error;

@@ -4,7 +4,7 @@
  */
 #define _GNU_SOURCE
 
-#define  NO_UMC_SOCKETS	    //XXX inhibit usermode_lib ucred for the one in sys/socket.h
+#define  NO_UMC_SOCKETS	    // inhibit usermode_lib ucred for the one in sys/socket.h
 #include <sys/socket.h>
 #include </usr/include/asm-generic/socket.h> /* sys/socket.h included the wrong asm/socket.h */
 #include "UMC_socket.h"	    // must be after sys/socket.h, when NO_UMC_SOCKETS

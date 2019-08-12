@@ -34,11 +34,11 @@ struct ahash_request { };
 #define CRYPTO_MINALIGN_ATTR	__attribute__ ((__aligned__(CRYPTO_MINALIGN)))
 
 #define crypto_has_alg(name_str, x, flag)		false
-#define crypto_alloc_hash(type_str, x, alg)		NULL		//XXXX
-#define crypto_hash_init(hash)				0		//XXXX
-#define crypto_hash_update(hash, sg, nbytes)		0		//XXXX
-#define crypto_hash_final(hash, id)			0		//XXXX
-#define crypto_free_hash(tfm)				DO_NOTHING()	//XXXX
+#define crypto_alloc_hash(type_str, x, alg)		NULL		//XXX
+#define crypto_hash_init(hash)				0		//XXX
+#define crypto_hash_update(hash, sg, nbytes)		0		//XXX
+#define crypto_hash_final(hash, id)			0		//XXX
+#define crypto_free_hash(tfm)				DO_NOTHING()	//XXX
 
 #define crypto_ahash_digestsize(h)			UMC_STUB(crypto_ahash_digestsize)
 #define crypto_ahash_final(h)				UMC_STUB(crypto_ahash_final)
@@ -46,8 +46,8 @@ struct ahash_request { };
 #define crypto_ahash_reqsize(h)				UMC_STUB(crypto_ahash_reqsize)
 #define crypto_ahash_reqtfm(h)				UMC_STUB(crypto_ahash_reqtfm)
 #define crypto_ahash_update(h)				UMC_STUB(crypto_ahash_update)
-#define crypto_alloc_ahash(a, b, c)			NULL		//XXXX
-#define crypto_alloc_shash(a, b, c)			NULL		//XXXX
+#define crypto_alloc_ahash(a, b, c)			NULL		//XXX
+#define crypto_alloc_shash(a, b, c)			NULL		//XXX
 #define crypto_free_ahash(h)				UMC_STUB(crypto_free_ahash)
 #define crypto_free_shash(h)				UMC_STUB(crypto_free_shash)
 #define crypto_shash_descsize(h)			UMC_STUB(crypto_shash_descsize)
@@ -87,14 +87,10 @@ ib_create_cq(struct ib_device *device, ib_comp_handler comp_handler,
 	    void (*event_handler)(struct ib_event *, void *), void *cq_context,
 	    unsigned int cqe, int comp_vector)
 {
-    return NULL;    //XXX ib_create_cq
+    return NULL;
 }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 32)
-#define ib_alloc_pd(device, flags)	NULL	//XXX
-#else
-#define ib_alloc_pd(device)		NULL	//XXX
-#endif
+#define ib_alloc_pd(device, flags...)	NULL
 
 struct ib_cq_init_attr;
 

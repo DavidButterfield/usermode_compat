@@ -112,7 +112,7 @@ _alloc_pages(gfp_t gfp, unsigned int order, sstring_t caller_id)
 #define page_cache_sync_readahead(map, ra, filp, index, x)	DO_NOTHING()
 #define mapping_writably_mapped(map)	false	/* no address aliasing */
 
-#define flush_dcache_page(page)		DO_NOTHING()		//XXXX
+#define flush_dcache_page(page)		DO_NOTHING()		//XXXXX ?
 
 #define alloc_page(gfp)			alloc_pages(gfp, 0)
 #define clear_page(addr)		memset((addr), 0, PAGE_SIZE)
@@ -129,9 +129,9 @@ _alloc_pages(gfp_t gfp, unsigned int order, sstring_t caller_id)
 #define PageUptodate(page)		true
 
 #define kmap(page)			(page_address(page))
-#define kmap_atomic(page, km_type)	(page_address(page))
-#define kunmap(page)			DO_NOTHING()
-#define kunmap_atomic(page, obsolete)	DO_NOTHING()
+#define kmap_atomic(page, type...)	kmap(page)
+#define kunmap(page)			DO_NOTHING(_USE(page))
+#define kunmap_atomic(page, type...)	kunmap(page)
 
 #define KM_BIO_SRC_IRQ			IGNORED
 #define KM_BIO_DST_IRQ			IGNORED

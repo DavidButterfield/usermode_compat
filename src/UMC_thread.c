@@ -15,8 +15,10 @@ unsigned int nr_cpu_ids;		/* number of CPUs at runtime */
 
 struct task_struct * UMC_irqthread;	/* delivers "softirq" callbacks */
 
+//XXXXX priv is unused
 void
-_force_sig(unsigned long signo, struct task_struct * task, sstring_t caller_id)
+_send_sig(unsigned long signo, struct task_struct * task,
+					    int priv, sstring_t caller_id)
 {
     task->signals_pending |= 1<<signo;
     trace_sig("%s: SIGNAL %lu (0x%lx) from task %s (%d) to task %s (%d)",
@@ -215,8 +217,8 @@ UMC_kthread_fn(void * v_task)
     /* completed by wake_up_process() */
     wait_for_completion(&task->start_release);
 
-    //XXXX set cpu affinity
-    //XXXX set nice
+    //XXXX set cpu affinity ?
+    //XXXX set nice ?
 
 				      /*** Run the kthread logic ***/
     error_t ret = task->exit_code = task->run_fn(task->run_env);
@@ -266,7 +268,7 @@ kthread_stop(struct task_struct * task)
 	/* Too slow -- jab it */
 	pr_warning("kthread_stop of %s (%u) excessive wait -- attempting signal\n",
 		    task->comm, task->pid);
-	force_sig(SIGSTKFLT, task);	/* try to get a stacktrace */
+	send_sig(SIGSTKFLT, task, 1);	/* try to get a stacktrace */
 	if (!wait_for_completion_timeout(&task->stopped, 3 * HZ)) {
 	    pr_warning("kthread_stop of %s (%u) excessive wait -- giving up\n",
 			task->comm, task->pid);
@@ -325,7 +327,7 @@ struct task_struct *
 UMC_kthread_run(error_t (*fn)(void * env), void * env, char * name, sstring_t caller_id)
 {
     struct task_struct * task = _kthread_create(fn, env, name, caller_id);
-    assert_ne(task, NULL);
+    assert(task);
     wake_up_process(task);
     return task;	    /* started OK */
 }
@@ -484,7 +486,7 @@ UMC_alarm_handler(void * const v_timer, uint64_t const now, error_t const err)
     struct timer_list * const timer = v_timer;
     //XXXXX expect_ne(timer->alarm, 0);   // Bug when alarm goes off quickly
 
-    //XXX A very recent call to mod_timer() may have updated the expire time
+    //XXXXX A very recent call to mod_timer() may have updated the expire time
     // assert(time_after_eq(now, jiffies_to_sys_time(timer->expires)));
     assert_ne(timer->function, 0);
     timer->alarm = NULL;
@@ -495,7 +497,7 @@ UMC_alarm_handler(void * const v_timer, uint64_t const now, error_t const err)
 
 /******************************************************************************/
 
-#include <sys/resource.h>	// setpriority()    //XXX extract
+#include <sys/resource.h>	// setpriority()    //XXX
 
 error_t
 set_user_nice(struct task_struct * task, int niceness)
@@ -506,7 +508,7 @@ set_user_nice(struct task_struct * task, int niceness)
 error_t
 UMC_sched_setscheduler(struct task_struct * task, int policy, struct sched_param * param)
 {
-//XXX He probably wants the realtime scheduler, but not happening today
+//XXXX He probably wants the realtime scheduler, but not happening today
 //  return UMC_kernelize(sched_setscheduler(task->pid, policy, param));
     // nice him up instead
     set_user_nice(task, param->sched_priority > 0 ? -20 : 0);

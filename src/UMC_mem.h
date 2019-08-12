@@ -191,8 +191,8 @@ static inline mempool_t *
 mempool_create(int min_nr, void * (*alloc_fn)(gfp_t, void *),
 		void (*free_fn)(void *, void *), void * pool_data)
 {
-    assert_ne(alloc_fn, NULL);
-    assert_ne(free_fn, NULL);
+    assert(alloc_fn);
+    assert(free_fn);
     mempool_t * mp = record_alloc(mp);
     mp->pool_data = pool_data;
     mp->alloc_fn = alloc_fn;

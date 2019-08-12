@@ -87,6 +87,7 @@ _unconstify(const void * cvp)
 #define __aligned(align)		__attribute__((__aligned__(align)))
 #define __packed			__attribute__((__packed__))
 #define __printf(F, A)			__attribute__((__format__(printf,F,A)))
+#define __maybe_unused			__attribute__((__unused__))
 
 /* Compiler branch hints */
 #define PREDICT(e, p)                   __builtin_expect((long)(e), (long)(p))

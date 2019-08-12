@@ -105,11 +105,8 @@ SHELL=/bin/bash
 LIBTCMUR = $(TCMUR_SRC)/libtcmur
 
 # Use the fuse/tcmu-runner logic in the tcmu-runner repository
-OBJS_LIBTCMUR += $(LIBTCMUR)/fuse_tree.o
-OBJS_LIBTCMUR += $(LIBTCMUR)/fuse_tcmur.o
-OBJS_LIBTCMUR += $(LIBTCMUR)/fuse_tcmur_ctl.o
-OBJS_LIBTCMUR += $(LIBTCMUR)/libtcmur.o
-OBJS_LIBTCMUR += $(LIBTCMUR)/simple_log.o
+OBJS_LIBTCMUR += $(LIBTCMUR)/libtcmur.a
+OBJS_LIBTCMUR += $(LIBTCMUR)/libfusetree.a
 
 # The usermode compatibility sources
 SRCS_D += usermode_lib.c
@@ -122,21 +119,19 @@ SRCS_D += UMC_thread.c
 SRCS_D += UMC_fuse_bio.c
 SRCS_D += UMC_bio_tcmur.c
 
+OBJS_D = $(SRCS_D:.c=.o)
+
 MY_CFLAGS += -g -ggdb -fno-omit-frame-pointer -fPIC -I. -isystem ./arch/x86/include -isystem include
 
 MY_CFLAGS += -I$(TCMUR_SRC) -I$(TCMUR_SRC)/ccan -I$(LIBTCMUR)
 
-OBJS_D = $(SRCS_D:.c=.o)
-
 all:	check_kcopy check_MTE
 	$(MAKE) cscope
+	$(MAKE) -C $(LIBTCMUR)
 	$(MAKE) usermode_lib.a
 
 usermode_lib.a: .depend $(OBJS_D) $(OBJS_LIBTCMUR)
 	$(LD) -d -z now -O 1 -E -r -o $@ $(OBJS_D) $(OBJS_LIBTCMUR)
-
-$(OBJS_LIBTCMUR):
-	$(MAKE) -C $(LIBTCMUR)
 
 check_kcopy:
 	@if [[ ! -d include ]] ; then $(MAKE) kcopy; fi
@@ -192,15 +187,18 @@ kcopy:	_kinclude _klib
 	@ touch			    include/linux/export.h
 	@ touch			    include/linux/autoconf.h
 
-_klib:
+_klib:	_kinclude
 	@# Get some .c files from the reference kernel
 	@ mkdir -p klib
 	@ cp $(REF_KERNEL)/lib/bitmap.c				klib
 	@#cp $(REF_KERNEL)/lib/libcrc32c.c			klib
-	@ cp $(REF_KERNEL)/lib/rbtree.c				klib
 	@ cp $(REF_KERNEL)/lib/dec_and_lock.c			klib
 	@ $(MAKE) klib/idr.c
 	@ $(MAKE) klib/nlattr.c
+	@##### cp $(REF_KERNEL)/lib/rbtree.c				klib
+	@ cp kincl_mod/rbtree.c-3.19.8				klib/rbtree.c
+	@ cp kincl_mod/rbtree.h-3.19.8				include/linux/rbtree.h
+	@ cp kincl_mod/rbtree_augmented.h-3.19.8		include/linux/rbtree_augmented.h
 
 klib/idr.c:
 	@ cp $(REF_KERNEL)/lib/idr.c				klib/idr.c

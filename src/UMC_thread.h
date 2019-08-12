@@ -10,7 +10,7 @@
 #define UMC_THREAD_H
 #include "UMC_sys.h"
 #include <pthread.h>	// pthreads
-#include <signal.h>	// SIGHUP, pthread_kill() XXX extract
+#include <signal.h>	// SIGHUP, pthread_kill() XXX
 
 #define trace_thread(args...)		printk(args)
 
@@ -54,7 +54,7 @@ struct task_struct {
     void		  * run_env;	    /* argument to run_fn */
     int			    exit_code;
     bool		    affinity_is_set;
-    unsigned long  volatile signals_pending;	/* force_sig/signal_pending */
+    unsigned long  volatile signals_pending;	/* send_sig/signal_pending */
     unsigned int	    state;
 
     sys_thread_t	    SYS;	    /* pointer to system thread info */
@@ -76,7 +76,7 @@ struct task_struct {
     int			    flags;	    /* ignored */
     void		  * io_context;	    /* unused */
     struct mm_struct      * mm;		    /* unused */
-    void		  * plug;	    //XXXX
+    void		  * plug;	    //XXXX unimplemented
 };
 
 extern __thread struct task_struct * current;    /* current thread */
@@ -104,11 +104,14 @@ extern struct _irqthread * UMC_irqthread;
 extern void UMC_sig_setup(void);
 extern int signal_pending(struct task_struct * task);
 
-#define force_sig(signo, task)		_force_sig((signo), (task), FL_STR)
-extern void _force_sig(unsigned long signo, struct task_struct * task, sstring_t caller_id);
+#define send_sig(signo, task, priv)	_send_sig((signo), (task), (priv), FL_STR)
+extern void _send_sig(unsigned long signo, struct task_struct * task,
+					    int priv, sstring_t caller_id);
 
 #define flush_signals(task)		_flush_signals((task), FL_STR)
 extern void _flush_signals(struct task_struct * task, sstring_t caller_id);
+
+#define allow_signal(signum)		DO_NOTHING()
 
 /******************************************************************************/
 /*** Wait Queue -- wait (if necessary) for a condition to be true ***/
@@ -457,7 +460,7 @@ struct rw_semaphore {
 		    _t->pid = gettid(); \
 		    _t->pthread = pthread_self(); \
 		} else { \
-		    assert_ne(current, NULL); \
+		    assert(current); \
 		} \
 		current = _t; \
 	    } while (0)
@@ -471,7 +474,7 @@ struct rw_semaphore {
 
 /* Wake up a specific task --
  * Each newly-created task needs a call here to get started.
- * Limitation: only implemented for task startup
+ * XXX Limitation: only implemented for task startup
  */
 #define wake_up_process(task)		kthread_start(task)
 #define kthread_start(task)		_kthread_start((task), FL_STR)
@@ -630,8 +633,8 @@ del_timer_sync(struct timer_list * timer)
 	timer->alarm = NULL;		/* Cancelled the alarm */
     } else {
 	assert_eq(err, EINVAL);		/* alarm entry not found on list */
-//	expect_eq(timer->alarm, NULL);	/* UMC_alarm_handler cleared this */ //XXXX fix this
-	timer->alarm = NULL;		//XXXX timer went off before timer->alarm assigned
+//	expect_eq(timer->alarm, NULL);	/* UMC_alarm_handler cleared this */ //XXXXX fix this
+	timer->alarm = NULL;		//XXXXX timer went off before timer->alarm assigned
     }
 
     return true;
@@ -644,7 +647,7 @@ static inline void
 _add_timer(struct timer_list * timer, sstring_t whence)
 {
     assert_eq(timer->alarm, NULL);
-    assert_ne(timer->function, NULL);
+    assert(timer->function);
     expect_gt(timer->expires, 0, "Adding timer with expiration at time zero");
     //XXXXX BUG: alarm can go off before timer->alarm gets set!
     timer->alarm = sys_alarm_set(UMC_irqthread->event_task,

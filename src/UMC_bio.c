@@ -71,7 +71,7 @@ lookup_bdev(const char * path, bool exclusive)
     list_for_each_entry(pos, &UMC_disk_list, disk_list)
 	if (!strcmp(pos->disk_name, p)) {
 	    bdev = disk_to_bdev(pos);
-	    assert_ne(bdev, NULL);
+	    assert(bdev);
 	    break;
 	}
 
@@ -111,10 +111,10 @@ _open_bdev(const char *path, fmode_t fmode)
     }
 
     assert_eq(bdev->bd_contains, bdev);	    /* no partitions */
-    assert_ne(bdev->bd_disk, NULL);
-    assert_ne(bdev->bd_disk->fops, NULL);
-    assert_ne(bdev->bd_disk->fops->open, NULL);
-    assert_ne(bdev->bd_disk->fops->release, NULL);
+    assert(bdev->bd_disk);
+    assert(bdev->bd_disk->fops);
+    assert(bdev->bd_disk->fops->open);
+    assert(bdev->bd_disk->fops->release);
 
     int error = bdev->bd_disk->fops->open(bdev, fmode);
     if (error) {
@@ -136,22 +136,43 @@ open_bdev_exclusive(const char *path, fmode_t fmode, void *holder)
     return _open_bdev(path, fmode);
 }
 
-void
-close_bdev_exclusive(struct block_device *bdev, fmode_t fmode)
+int
+_close_bdev(struct block_device * bdev, fmode_t fmode)
 {
+    struct gendisk * disk = bdev->bd_disk;
+    int ret = 0;
+
     assert_eq(bdev->bd_contains, bdev);
-    assert_ne(bdev->bd_disk, NULL);
-    assert_ne(bdev->bd_disk->fops, NULL);
-    expect_ne(bdev->bd_disk->fops->release, NULL);
+    assert(disk);
+    assert(disk->fops);
+    expect_ne(disk->fops->release, NULL);
+    trace_bdev("name='%s' size=%"PRIu64, disk->disk_name, bdev_size(bdev));
 
-    trace_bdev("name='%s' size=%"PRIu64, bdev->bd_disk->disk_name, bdev_size(bdev));
-
-    fmode |= FMODE_EXCL;
-
-    if (bdev->bd_disk->fops->release)
-	bdev->bd_disk->fops->release(bdev->bd_disk, fmode);
+    if (disk->fops->release)
+	ret = disk->fops->release(disk, fmode);
 
     bdput(bdev);	/* --refcount */
+    return ret;
+}
+
+void
+close_bdev_exclusive(struct block_device * bdev, fmode_t fmode)
+{
+    fmode |= FMODE_EXCL;
+    _close_bdev(bdev, fmode);
+}
+
+int
+blkdev_put(struct block_device *bdev, fmode_t fmode)
+{
+    int ret = _close_bdev(bdev, fmode);
+/* XXXXXXXX bd_openers as refcount ?
+    if (!bdev->bd_openers) {
+	put_disk(disk);
+	bdev->bd_disk = NULL;
+    }
+*/
+    return ret;
 }
 
 struct gendisk *
@@ -229,7 +250,7 @@ bdev_complex_free(struct block_device * bdev)
     bdput(bdev);				/* drop bdev and inode */
 }
 
-static inline void
+void
 bio_free(struct bio *bio, struct bio_set *bs)
 {
     assert_eq(bs, NULL);
@@ -240,6 +261,7 @@ bio_free(struct bio *bio, struct bio_set *bs)
 void
 bio_destructor(struct bio *bio)
 {
+    //XXXXXX need to call client's destructor?
     bio_free(bio, NULL);
 }
 
