@@ -195,10 +195,7 @@ _klib:	_kinclude
 	@ cp $(REF_KERNEL)/lib/dec_and_lock.c			klib
 	@ $(MAKE) klib/idr.c
 	@ $(MAKE) klib/nlattr.c
-	@##### cp $(REF_KERNEL)/lib/rbtree.c				klib
-	@ cp kincl_mod/rbtree.c-3.19.8				klib/rbtree.c
-	@ cp kincl_mod/rbtree.h-3.19.8				include/linux/rbtree.h
-	@ cp kincl_mod/rbtree_augmented.h-3.19.8		include/linux/rbtree_augmented.h
+	@ cp $(REF_KERNEL)/lib/rbtree.c				klib
 
 klib/idr.c:
 	@ cp $(REF_KERNEL)/lib/idr.c				klib/idr.c
