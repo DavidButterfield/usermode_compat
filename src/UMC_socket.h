@@ -75,7 +75,7 @@ struct sock {
     sys_poll_entry_t	    wr_poll_entry;	/* unique poll descriptor for this fd */
     sys_event_task_t	    rd_poll_event_task;
     sys_poll_entry_t	    rd_poll_entry;
-    struct _irqthread     * rd_poll_event_thread;
+    struct task_struct    * rd_poll_event_thread;
 
     uint16_t sk_family;
     union {
@@ -259,7 +259,11 @@ UMC_sock_poll_start(struct socket * sock, void (*recv)(struct sock *, int),
 					  SYS_SOCKET_XMIT_ET, "socket_xmit_poll_entry");
     }
     if (recv || state) {
-	sock->sk->rd_poll_event_thread = irqthread_run("%s", recv_thread_name);
+	struct sys_event_task_cfg cfg = {
+	    .max_polls = SYS_ETASK_MAX_POLLS,
+	    .max_steps = SYS_ETASK_MAX_STEPS,
+	};
+	sock->sk->rd_poll_event_thread = irqthread_run(&cfg, "%s", recv_thread_name);
 	sock->sk->rd_poll_event_task = sock->sk->rd_poll_event_thread->event_task;
 	sock->sk->rd_poll_entry = sys_poll_enable(sock->sk->rd_poll_event_task,
 					  UMC_sock_recv_event, sock, sock->sk->fd,
@@ -334,15 +338,14 @@ sock_create_kern(int family, int type, int protocol, struct socket **newsock)
 }
 
 struct fput_finish_work {
-    struct _irqthread		  * irqthread;
+    struct task_struct		  * irqthread;
     struct work_struct		    work;
 };
 
 static inline void
-_fput_finish_work_fn(struct _irqthread * irqthread)
+_fput_finish_work_fn(struct task_struct * irqthread)
 {
     irqthread_stop(irqthread);
-    irqthread_destroy(irqthread);
 }
 
 static inline void

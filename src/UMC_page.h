@@ -91,7 +91,7 @@ _alloc_pages(gfp_t gfp, unsigned int order, sstring_t caller_id)
 {
     //XXXX Use a kmem_cache for the page structure
     struct page * page = record_alloc(page);
-    // mem_buf_allocator_set(page, caller_id);
+    sys_buf_allocator_set(page, caller_id);
 
     kref_init(&page->kref);
     mutex_init(&page->lock);
@@ -99,7 +99,7 @@ _alloc_pages(gfp_t gfp, unsigned int order, sstring_t caller_id)
 
     expect_eq(order, 0, "usermode_lib.h: Check semantics for alloc_pages()");
     page_address(page) = __get_free_pages(gfp, order);
-    // mem_buf_allocator_set(page_address(page), caller_id);
+    sys_buf_allocator_set(page_address(page), caller_id);
 
     spin_lock(&UMC_pagelist_lock);
     list_add(&page->UMC_page_list, &UMC_pagelist);
@@ -211,7 +211,7 @@ _mempool_create_page_pool(int min_nr, int order, sstring_t caller_id)
     expect_eq(order, 0);	/* only order zero for now */
     mp->private = order;
     mp->destroy_fn = _page_pool_destroy;
-    // mem_buf_allocator_set(mp, caller_id);
+    sys_buf_allocator_set(mp, caller_id);
     return mp;
 }
 

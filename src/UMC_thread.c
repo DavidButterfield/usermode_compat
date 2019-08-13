@@ -6,7 +6,8 @@
 #include "UMC_thread.h"
 #include "UMC_lock.h"
 
-#define trace_sig(fmtargs...)		printk(fmtargs)
+#define trace_kthread(fmtargs...)	nlprintk(fmtargs)
+#define trace_sig(fmtargs...)		nlprintk(fmtargs)
 
 __thread struct task_struct * current;   /* current task (thread) structure */
 struct task_struct UMC_init_current_space;
@@ -245,7 +246,7 @@ UMC_kthread_fn(void * v_task)
 void
 _kthread_start(struct task_struct * task, sstring_t whence)
 {
-    pr_debug("%s: thread %s (%p, %u) WAKES UP thread %s (%p, %u)\n",
+    trace_kthread("%s: thread %s (%p, %u) WAKES UP thread %s (%p, %u)\n",
 		whence, current->comm, current, current->pid,
 		task->comm, task, task->pid);
     /* Let a newly-created thread get going */
@@ -253,8 +254,8 @@ _kthread_start(struct task_struct * task, sstring_t whence)
 }
 
 /* Marks kthread for exit, waits for it to exit, and returns its exit code */
-error_t
-kthread_stop(struct task_struct * task)
+static error_t
+_kthread_stop(struct task_struct * task)
 {
     verify(task != current, "task %s (%u) cannot kthread_stop itself",
 			    task->comm, task->pid);
@@ -279,10 +280,21 @@ kthread_stop(struct task_struct * task)
     /* Take the lock to sync with the end of UMC_kthread_fn() */
     spin_lock(&task->stopped.wait.lock);    /* no matching unlock */
 
-    error_t const ret = task->exit_code;
+    return task->exit_code;
+}
 
-    sys_thread_free(task->SYS);
-    UMC_current_free(task);
+/* stop the kthread and then free it, returning its exit code */
+error_t
+kthread_stop(struct task_struct * task)
+{
+    error_t ret;
+    assert(!task->event_task);
+
+    ret = _kthread_stop(task);
+    if (ret != -EBUSY) {	    //XXX
+	sys_thread_free(task->SYS);
+	UMC_current_free(task);
+    }
 
     return ret;
 }
@@ -296,7 +308,7 @@ _kthread_create(error_t (*fn)(void * env), void * env, char * name, sstring_t ca
     init_completion(&task->stopped);
 
     sys_thread_t thread = sys_thread_alloc(UMC_kthread_fn, task, vstrdup(name));
-    //mem_buf_allocator_set(thread, caller_id);
+    sys_buf_allocator_set(thread, caller_id);
 
     /* name string is copied into comm[] in the task_struct */
     UMC_current_init(task, thread, fn, env, name);
@@ -306,7 +318,7 @@ _kthread_create(error_t (*fn)(void * env), void * env, char * name, sstring_t ca
     task->SYS->nice = nice(0);
     task->cpus_allowed = current->cpus_allowed;
 
-    pr_debug("current task %s (%p, %u) creates kthread/task %s (%p)\n",
+    trace_kthread("task %s (%p, %u) creates kthread/task %s (%p)\n",
 	     current->comm, current, current->pid, task->comm, task);
 
     error_t const err = sys_thread_start(task->SYS);
@@ -328,8 +340,9 @@ UMC_kthread_run(error_t (*fn)(void * env), void * env, char * name, sstring_t ca
 {
     struct task_struct * task = _kthread_create(fn, env, name, caller_id);
     assert(task);
-    wake_up_process(task);
-    return task;	    /* started OK */
+    kthread_start(task);
+    _kthread_start(task, caller_id);
+    return task;
 }
 
 /* Run a separate shutdown thread */
@@ -411,7 +424,7 @@ create_workqueue(sstring_t name)
     spin_lock(&workq->lock);	/* synchronize with owner assertion in UMC_work_queue_thr */
 
     workq->owner = kthread_run(UMC_work_queue_thr, workq, "%s", name);
-    // mem_buf_allocator_set(workq->owner, name);
+    sys_buf_allocator_set(workq->owner, name);
 
     spin_unlock(&workq->lock);
 
@@ -573,4 +586,46 @@ UMC_rcu_cb_fn(void * unused)
     }
 
     return 0;
+}
+
+/******************************************************************************/
+
+static error_t
+event_task_run(void * event_task)
+{
+    return sys_event_task_run(event_task);
+}
+
+struct task_struct *
+_irqthread_run(struct sys_event_task_cfg * cfg, char * name, sstring_t caller_id)
+{
+    struct task_struct * task;
+    struct sys_event_task * event_task = sys_event_task_alloc(cfg);
+    task = _kthread_create(event_task_run, event_task, name, caller_id);
+    task->event_task = event_task;
+    set_user_nice(task, nice(0) - 10);
+    kthread_start(task);
+    return task;
+}
+
+error_t
+irqthread_stop(struct task_struct * task)
+{
+    error_t ret;
+    struct sys_event_task * event_task = task->event_task;
+    expect_ne(event_task, NULL);
+    if (!event_task)
+	return -EINVAL;
+
+    task->should_stop = true;
+    sys_event_task_stop(event_task);
+
+    ret = _kthread_stop(task);
+    if (ret != -EBUSY) {	    //XXX
+	sys_event_task_free(event_task);
+	sys_thread_free(task->SYS);
+	UMC_current_free(task);
+    }
+
+    return ret;
 }

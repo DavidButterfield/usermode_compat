@@ -9,8 +9,8 @@
 #include </usr/include/asm-generic/socket.h> /* sys/socket.h included the wrong asm/socket.h */
 #include "UMC_socket.h"	    // must be after sys/socket.h, when NO_UMC_SOCKETS
 
-#define trace_socket(fmtargs...)	    //	printk(fmtargs)
-#define trace_socket_verbose(fmtargs...)    //	printk(fmtargs)
+#define trace_socket(fmtargs...)	    //	nlprintk(fmtargs)
+#define trace_socket_verbose(fmtargs...)    //	nlprintk(fmtargs)
 
 void
 sock_inode_destructor(struct inode * inode)

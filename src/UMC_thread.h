@@ -12,7 +12,7 @@
 #include <pthread.h>	// pthreads
 #include <signal.h>	// SIGHUP, pthread_kill() XXX
 
-#define trace_thread(args...)		printk(args)
+#define trace_thread(args...)		nlprintk(args)
 
 #define	NR_CPUS				BITS_PER_LONG
 
@@ -89,15 +89,15 @@ typedef struct wait_queue_entry	{ /*unused*/ } wait_queue_entry_t;
 
 extern struct task_struct UMC_init_current_space;   /* current for thread tid==pid */
 
-#define _irqthread task_struct
-#define irqthread_run(a...) NULL
-#define irqthread_stop(a)    { }
-#define irqthread_destroy(a)	 { }
-extern struct _irqthread * UMC_irqthread;
+extern struct task_struct * UMC_irqthread;
+extern error_t irqthread_stop(struct task_struct *);
+
+#define irqthread_run(cfg, fmtargs...)    _irqthread_run((cfg), kasprintf(0, fmtargs), FL_STR)
+extern struct task_struct * _irqthread_run(struct sys_event_task_cfg *, char *, sstring_t);
 
 /******************************************************************************/
 
-#define trace_signal(fmtargs...)    //	printk(fmtargs)
+#define trace_signal(fmtargs...)	nlprintk(fmtargs)
 
 #define UMC_SIGNAL			SIGHUP	/* inter-thread signal */
 
@@ -483,8 +483,9 @@ extern void _kthread_start(struct task_struct * task, sstring_t whence);
 /* Create and initialize a kthread structure -- the pthread is not started yet */
 #define kthread_create(fn, env, fmtargs...) \
 	    _kthread_create((fn), (env), kasprintf(0, fmtargs), FL_STR)
-extern struct task_struct * _kthread_create(error_t (*fn)(void * env), void * env,
-					    char * name, sstring_t caller_id);
+
+extern struct task_struct * _kthread_create(error_t (*fn)(void * env),
+				void * env, char * name, sstring_t caller_id);
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 39)
 #define kthread_create_on_node(fn, env, node, fmtargs...) \
@@ -566,7 +567,7 @@ __tasklet_init(struct tasklet_struct * tasklet, void (*fn)(long), long arg, sstr
 
     spin_lock(&tasklet->lock);
     tasklet->owner = kthread_run(UMC_tasklet_thr, tasklet, "%s", name);
-    //mem_buf_allocator_set(tasklet->owner, name);
+    sys_buf_allocator_set(tasklet->owner, name);
     spin_unlock(&tasklet->lock);
 }
 
@@ -620,6 +621,8 @@ del_timer_sync(struct timer_list * timer)
     if (alarm == NULL)
 	return false;	    /* not pending */
 
+    assert(UMC_irqthread);
+
     /* sys_alarm_cancel() cancels if possible; otherwise synchronizes with delivery to
      * guarantee the event task thread is not (any longer) executing the handler (for
      * the alarm we tried to cancel) at the time sys_alarm_cancel() returns to us here.
@@ -646,6 +649,7 @@ del_timer_sync(struct timer_list * timer)
 static inline void
 _add_timer(struct timer_list * timer, sstring_t whence)
 {
+    assert(UMC_irqthread);
     assert_eq(timer->alarm, NULL);
     assert(timer->function);
     expect_gt(timer->expires, 0, "Adding timer with expiration at time zero");

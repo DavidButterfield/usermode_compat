@@ -9,7 +9,7 @@
 #define _GNU_SOURCE
 #include "UMC_bio.h"
 
-#define trace_bdev(fmtargs...)		printk(fmtargs)
+#define trace_bdev(fmtargs...)		nlprintk(fmtargs)
 
 LIST_HEAD(UMC_pagelist);		/* list for struct page */
 DEFINE_SPINLOCK(UMC_pagelist_lock);

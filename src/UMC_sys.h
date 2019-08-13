@@ -129,8 +129,35 @@ typedef unsigned int			fmode_t;
 /******************************************************************************/
 //XXX   This mem stuff belongs in sys_service.h   XXX
 
-#define sys_vasprintf(ret, fmt, va)	vasprintf((ret), fmt, va)
-#define sys_asprintf(fmtargs...)	asprintf(fmtargs)
+/* Return a newly-allocated freeable formatted string from the printf-like arguments */
+//XXX These should be non-inline varargs functions (instead of macros)
+
+/* Use asprintf(), then copy result into our tracked memory */
+#define sys_asprintf(_retp, fmtargs...)					    \
+({									    \
+    char * _str;							    \
+    int len = asprintf(&_str, fmtargs);					    \
+    if (len < 0) {							    \
+	*(_retp) = NULL;						    \
+    } else {								    \
+	*(_retp) = strncpy(sys_mem_alloc(1 + len), _str, 1 + len);	    \
+	free(_str);							    \
+    }									    \
+    len;								    \
+})
+
+#define sys_vasprintf(_retp, fmt, va)					    \
+({									    \
+    char * _str;							    \
+    int len = vasprintf(&_str, fmt, va);				    \
+    if (len < 0) {							    \
+	*(_retp) = NULL;						    \
+    } else {								    \
+	*(_retp) = strncpy(sys_mem_alloc(1 + len), _str, 1 + len);	    \
+	free(_str);							    \
+    }									    \
+    len;								    \
+})
 
 #define sys_buf_allocator_set(buf, id)
 
@@ -314,6 +341,19 @@ _find_next_bit(const unsigned long *src, unsigned long nbits,
 
 /* Override the __WARN() in bug.h included from linux/kernel.h */
 #define __WARN()    printk(KERN_WARNING "at %s\n", FL_STR);
+
+#include <linux/kernel.h>   /* linux/kernel.h is the first kernel header file to #include */
+
+/* Override declarations of these in linux/kernel.h */
+#define vprintk(fmt, va_list)	vfprintf(stderr, fmt, va_list)
+//#define printk(fmt, args...)	fprintf(stderr, "[%d]" FL_STR "> " fmt, gettid(), ##args)
+#define printk(fmt, args...)	fprintf(stderr, fmt, ##args)
+
+#define nlprintk(fmtargs...)	_nlprintk(""fmtargs)
+#define _nlprintk(fmt, args...)	printk(fmt"\n", ##args)
+
+#define printk_ratelimit(void)				0
+#define printk_timed_ratelimit(jiffies, interval_msec)	false
 
 #include "UMC_kernel.h"	    /* include first after linux/kernel.h */
 

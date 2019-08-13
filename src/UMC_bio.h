@@ -13,7 +13,7 @@
 #include "UMC_inode.h"
 #include "UMC_page.h"
 
-#define trace_err(args...)		printk(args)
+#define trace_err(args...)		nlprintk(args)
 
 extern const char * UMC_fuse_mount_point;   /* e.g. "/UMCfuse" *///XXXXXX
 

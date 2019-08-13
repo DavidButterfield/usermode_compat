@@ -9,12 +9,6 @@
 #include "UMC_fuse_proc.h"
 #include <ctype.h>
 
-static error_t
-event_task_run(void * event_task)
-{
-    return sys_event_task_run(event_task);
-}
-
 /* Initialize the usermode_lib usermode compatibility module */
 /* mountpoint is the path to the procfs or sysfs mount point */
 error_t
@@ -63,15 +57,17 @@ UMC_init(const char * mountpoint)
 	err = libtcmur_init(NULL);		/* default handler_prefix */
 	verify_eq(err, 0, "libtcmur_init");
 
-	err = bio_tcmur_init(tcmur_major, tcmur_max_minor, &fuse_bio_ops);
-	verify_eq(err, 0, "bio_tcmur_init");
-
 	err = fuse_tree_init(mountpoint);
 	verify_eq(err, 0, "fuse_tree_init");
 
+	fuse_tree_mkdir("proc", NULL);
 	fuse_tree_mkdir("dev", NULL);
 	fuse_node_t fnode_sys = fuse_tree_mkdir("sys", NULL);
-	fuse_tree_mkdir("modules", fnode_sys);
+	fuse_tree_mkdir("module", fnode_sys);
+
+	/* bio_tcmur_init() after /dev established */
+	err = bio_tcmur_init(tcmur_major, tcmur_max_minor, &fuse_bio_ops);
+	verify_eq(err, 0, "bio_tcmur_init");
 
 	err = fuse_bio_init();
 	verify_eq(err, 0, "fuse_bio_init");
@@ -89,9 +85,7 @@ UMC_init(const char * mountpoint)
 	    .max_polls = SYS_ETASK_MAX_POLLS,
 	    .max_steps = SYS_ETASK_MAX_STEPS,
 	};
-	UMC_irqthread = kthread_create(event_task_run, &cfg, "UMC_irqthread");
-	set_user_nice(UMC_irqthread, nice(0) - 5);	//XXX
-	kthread_start(UMC_irqthread);
+	UMC_irqthread = irqthread_run(&cfg, "UMC_irqthread");
     }
 
     /* Start the general-purpose work queue */
@@ -111,7 +105,7 @@ UMC_exit(void)
 
     netlink_exit();
 
-    kthread_stop(UMC_irqthread);
+    irqthread_stop(UMC_irqthread);
     UMC_irqthread = NULL;
 
     {
@@ -126,16 +120,16 @@ UMC_exit(void)
 	    err = fuse_bio_exit();
 	    expect_eq(err, 0, "fuse_bio_exit");
 
+	    err = bio_tcmur_exit();
+	    expect_eq(err, 0, "bio_tcmur_exit");
+
 	    fuse_tree_rmdir("dev", NULL);
 	    fuse_node_t fnode_sys = fuse_node_lookup("sys");
-	    fuse_tree_rmdir("modules", fnode_sys);
+	    fuse_tree_rmdir("module", fnode_sys);
 	    fuse_tree_rmdir("sys", NULL);
 
 	    err = fuse_tree_exit();
 	    expect_eq(err, 0, "fuse_tree_exit");
-
-	    err = bio_tcmur_exit();
-	    expect_eq(err, 0, "bio_tcmur_exit");
 
 	    err = libtcmur_exit();
 	    expect_eq(err, 0, "libtcmur_exit");

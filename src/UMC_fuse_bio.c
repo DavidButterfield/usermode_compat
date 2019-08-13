@@ -19,7 +19,7 @@
 #include "fuse_tree.h"
 #include "fuse_tcmur.h"
 
-#define trace_bio(args...)		//	printk(args)
+#define trace_bio(args...)		//	nlprintk(args)
 
 static error_t
 fuse_bio_open(fuse_node_t fnode, uintptr_t bdev_uip)

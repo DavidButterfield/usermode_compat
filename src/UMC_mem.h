@@ -136,7 +136,7 @@ kmem_cache_create(const char * name, size_t size, size_t req_align,
 {
     size_t min_align;
     assert_eq(constructor, NULL);   /* XXX kmem_cache constructor unimplemented */
-    expect_eq(flags, 0);
+    assert_eq(flags & __GFP_ZERO, 0);	//XXX not implemented
 
     if (flags & SLAB_HWCACHE_ALIGN)
 	min_align = __CACHE_LINE_BYTES;

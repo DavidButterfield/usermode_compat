@@ -13,7 +13,7 @@
 /* Import Hacked-up copy of UMC_genl.c */
 #include "UMC_genl.c"	    //XXX
 
-#define trace_netlink(fmtargs...)    //	printk(fmtargs)
+#define trace_netlink(fmtargs...)    //	nlprintk(fmtargs)
 
 struct net init_net;
 

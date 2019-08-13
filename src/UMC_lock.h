@@ -14,7 +14,7 @@
 #include <pthread.h>	//XXXXXX remove after fixing to use sys_mutex, not pthread_mutex
 #include <semaphore.h>	//XXX could move this to .c file
 
-#define trace_lock(args...)	//	printk(args)
+#define trace_lock(args...)	//	nlprintk(args)
 
 #define UMC_LOCK_CHECKS	    /* do lock checks in all builds */
 

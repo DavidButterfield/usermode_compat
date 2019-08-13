@@ -18,8 +18,8 @@
 #include "UMC_fuse_proc.h"
 #include "fuse_tree.h"
 
-#define trace_cb(args...)		printk(args)
-#define trace_fuse_thread(args...)	printk(args)
+#define trace_cb(args...)		nlprintk(args)
+#define trace_fuse_thread(args...)	nlprintk(args)
 
 static ssize_t
 fuse_pde_read(uintptr_t pde_arg, void * buf, size_t iosize, off_t ofs)
@@ -40,28 +40,42 @@ static struct fuse_node_ops fuse_pde_ops = {
     .write = fuse_pde_write,
 };
 
+/* add a new fuse/pde node-pair under parent; NULL parent denotes /proc */
 struct proc_dir_entry *
 fuse_pde_add(const char * name, struct proc_dir_entry * parent, umode_t mode,
 		const struct file_operations * proc_fops, void * data)
 {
-    struct proc_dir_entry * pde = NULL;
+    struct proc_dir_entry * pde;
     fuse_node_t fnode;
     fuse_node_t parent_fnode;
+    uintptr_t pde_uip;
 
     if (parent)
 	parent_fnode = parent->fnode;
     else
 	parent_fnode = fuse_node_lookup("/proc");
 
+    expect_ne(parent_fnode, NULL, "cannot find /proc\n%s\n", fuse_tree_fmt());
     if (!parent_fnode)
 	return NULL;
 
-    fnode = fuse_node_add(name, parent->fnode, mode, &fuse_pde_ops, (uintptr_t)pde);
+    fnode = fuse_node_lookupat(parent_fnode, name);
     if (fnode) {
-	pde = record_alloc(pde);
-	pde->fnode = fnode;
-	pde->proc_fops = proc_fops;
-	pde->data = data;
+	/* Node already exists -- return it */
+	pde = (void *)(pde_uip = fuse_node_data_get(fnode));
+	assert(pde);
+	assert_eq(pde->fnode, fnode);
+	return pde;
+    }
+
+    /* Create the fuse/pde node pair -- fuse node data points to the pde */
+    pde = record_alloc(pde);
+    pde->proc_fops = proc_fops;
+    pde->data = data;
+    pde->fnode = fuse_node_add(name, parent_fnode, mode, &fuse_pde_ops, (uintptr_t)pde);
+    if (!pde->fnode) {
+	record_free(pde);
+	return NULL;
     }
 
     return pde;
@@ -70,39 +84,36 @@ fuse_pde_add(const char * name, struct proc_dir_entry * parent, umode_t mode,
 struct proc_dir_entry *
 fuse_pde_mkdir(const char * name, struct proc_dir_entry * parent)
 {
-    struct proc_dir_entry * pde = NULL;
-    fuse_node_t fnode;
-    fuse_node_t parent_fnode;
-
-    if (parent)
-	parent_fnode = parent->fnode;
-    else
-	parent_fnode = fuse_node_lookup("/sys/modules");
-
-    if (!parent_fnode)
-	return NULL;
-
-    fnode = fuse_tree_mkdir(name, parent_fnode);
-    if (fnode) {
-	pde = record_alloc(pde);
-	pde->fnode = fnode;
-    }
-
-    return pde;
+    return fuse_pde_add(name, parent, S_IFDIR|0555, NULL, NULL);
 }
 
 error_t
 fuse_pde_remove(const char * name, struct proc_dir_entry * parent)
 {
+    struct proc_dir_entry * pde;
+    fuse_node_t fnode;
+    fuse_node_t parent_fnode;
     error_t err;
     uintptr_t pde_uip;
-    struct proc_dir_entry * pde;
-    fuse_node_t fnode = fuse_node_lookupat(parent->fnode, name);
+
+    if (parent)
+	parent_fnode = parent->fnode;
+    else
+	parent_fnode = fuse_node_lookup("/proc");
+
+    expect_ne(parent_fnode, NULL, "cannot find /proc\n%s\n", fuse_tree_fmt());
+    if (!parent_fnode)
+	return -ENOENT;
+
+    fnode = fuse_node_lookupat(parent_fnode, name);
     if (!fnode)
 	return -ENOENT;
 
     pde = (void *)(pde_uip = fuse_node_data_get(fnode));
-    err =  fuse_node_remove(name, fnode);
+    assert(pde);
+    assert_eq(pde->fnode, fnode);
+
+    err =  fuse_node_remove(name, parent_fnode);
     if (!err)
 	record_free(pde);
 
@@ -264,6 +275,8 @@ fuse_thread_start(void)
     fuse_thr = kthread_create(fuse_thread_run, NULL, "UMC_fuse");
     if (IS_ERR(fuse_thr))
 	return PTR_ERR(fuse_thr);
+
+    UMC_FUSE_THREAD = fuse_thr;
 
     set_user_nice(fuse_thr, nice(0) - 10);	//XXXX TUNE
 

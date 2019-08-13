@@ -13,7 +13,7 @@
 #include "UMC_bio.h"	    //XXX unfortunate
 #include <fcntl.h>	    // open, O_*, etc
 
-#define trace_file(fmtargs...)	    //	printk(fmtargs)
+#define trace_file(fmtargs...)	    //	nlprintk(fmtargs)
 
 #define S_IRUGO				(S_IRUSR|S_IRGRP|S_IROTH)
 #define S_IWUGO				(S_IWUSR|S_IWGRP|S_IWOTH)
