@@ -84,7 +84,7 @@ io_continue(struct tcmu_device * tcmu_dev,
     if (sts != TCMU_STS_OK)
 	io_done_sts(tcmu_dev, cmd, sts);
     else {
-	bio->bi_rw &= ~BIO_RW_BARRIER;
+	bio->bi_rw &= ~REQ_BARRIER;
 	make_request(NULL, bio);
 	assert_eq(cmd->iovec, 0);	/* the fsync had no iovec */
 	kmem_cache_free(op_cache, op);
@@ -125,12 +125,20 @@ make_request(struct request_queue *rq_unused, struct bio * bio)
 	goto out_finish;
     }
 
+    #define BITS_OK ((1ul<<BIO_RW_FAILFAST)|(1ul<<BIO_RW_META)|(1ul<<BIO_RW_AHEAD) \
+		    |(1ul<<BIO_RW_SYNCIO)|(1ul<<BIO_RW_UNPLUG)|(1ul<<BIO_RW_BARRIER))
+    expect_eq(bio->bi_rw & ~(WRITE|BITS_OK), 0,
+		"Unexpected bi_rw bits 0x%lx/0x%lx",
+		bio->bi_rw & ~(WRITE|BITS_OK), bio->bi_rw);
+
     op = kmem_cache_zalloc(op_cache, 0);
     if (!op)
 	return -ENOMEM;
 
-    cmd = &op->cmd;
     op->bio = bio;
+
+    cmd = &op->cmd;
+    cmd->done = io_done_sts;
 
     if (is_sync) {
 	if (!bio_empty_barrier(bio))
@@ -184,7 +192,6 @@ make_request(struct request_queue *rq_unused, struct bio * bio)
     assert_eq(seekpos % 512, 0);
 
     cmd->iov_cnt = iovn;		    /* number of iovec elements we filled in */
-    cmd->done = io_done_sts;
 
     /* Submit the command to the handler */
     if (is_write) {
@@ -218,9 +225,6 @@ struct block_device_operations bio_tcmur_ops = {
     .release = bio_tcmur_release,
 };
 
-static struct fuse_node_ops * fuse_node_ops;
-static fuse_node_t fnode_dev;
-
 static bool bio_enabled;
 
 /* Add a new tcmur bdev at minor */
@@ -245,53 +249,35 @@ bio_tcmur_add(int minor)
     block_size = tcmur_get_block_size(minor);
     blkbits = ilog2(block_size);
 
+    pr_notice("bio_tcmur_add minor=%d size=%ld blkbits=%d block_size=%ld\n",
+		minor, size, blkbits, block_size);
+
     if (block_size != 1u << blkbits) {
-	tcmu_err("%s: bad block size=%ld not a power of two (%d)\n",
+	pr_err("%s: bad block size=%ld not a power of two (%d)\n",
 			    tcmur_get_dev_name(minor), block_size, blkbits);
 	return -EINVAL;
     }
 
     if (block_size < 512 || block_size > UINT_MAX) {
-	tcmu_err("%s: bad block size=%ld\n",
+	pr_err("%s: bad block size=%ld\n",
 			    tcmur_get_dev_name(minor), block_size);
 	return -EINVAL;
     }
 
     if (size < block_size) {
-	tcmu_err("%s: bad device size=%"PRIu64"\n",
+	pr_err("%s: bad device size=%"PRIu64"\n",
 			    tcmur_get_dev_name(minor), size);
 	return -EINVAL;
     }
 
-    bdev = bdev_complex(tcmur_get_dev_name(minor),
-			bio_tcmur_major, minor, make_request);
+    bdev = bdev_complex(tcmur_get_dev_name(minor), bio_tcmur_major, minor,
+			make_request, blkbits, size);
 
     bdev->bd_disk->fops = &bio_tcmur_ops;
-
-    bdev->bd_block_size = (unsigned int)block_size;
-    bdev->bd_inode->i_blkbits = blkbits;
-    bdev->bd_inode->i_mode = bdev_read_only(bdev) ? 0440 : 0660;
-    bdev->bd_inode->i_mode |= S_IFBLK;
-    bdev->bd_inode->i_size = size;
 
     set_capacity(bdev->bd_disk, size>>9);
 
     the_bio_tcmur_bdevs[minor] = bdev;
-
-    {
-	fuse_node_t fnode = fuse_node_add(bdev->bd_disk->disk_name, fnode_dev,
-					    bdev->bd_inode->i_mode,
-					    fuse_node_ops, (uintptr_t)bdev);
-	if (fnode) {
-	    fuse_node_update_size(fnode,
-			(size_t)tcmur_get_size(minor));
-	    fuse_node_update_block_size(fnode,
-			tcmur_get_block_size(minor));
-	} else
-	    pr_warning("Cannot add fuse node for minor %d (%s)\n",
-		    minor, bdev->bd_disk->disk_name);
-    }
-
     return 0;
 }
 
@@ -299,22 +285,14 @@ bio_tcmur_add(int minor)
 error_t
 bio_tcmur_remove(int minor)
 {
-    error_t err;
     struct block_device * bdev = bdev_of_minor(minor);
     if (!bdev)
 	return -ENOENT;
 
-    the_bio_tcmur_bdevs[minor] = NULL;
-
-    err = fuse_node_remove(bdev->bd_disk->disk_name, fnode_dev);
-    if (err) {
-	pr_warning("remove %s (%d): %s\n",
-		tcmur_get_dev_name(minor), minor, strerror(-err));
-	return err;
-    }
+    //XXXXX Need to check refcount first or use iput or something
 
     bdev_complex_free(bdev);
-
+    the_bio_tcmur_bdevs[minor] = NULL;
     return 0;
 }
 
@@ -322,7 +300,7 @@ bio_tcmur_remove(int minor)
  * called, then minors will be created with fuse nodes but no bio interface.
  */
 error_t
-bio_tcmur_init(int major, int max_minor, struct fuse_node_ops * fuse_ops)
+bio_tcmur_init(int major, int max_minor)
 {
     assert_eq(bio_enabled, 0);		    /* double init */
     assert_gt(max_minor, 0);
@@ -347,14 +325,6 @@ bio_tcmur_init(int major, int max_minor, struct fuse_node_ops * fuse_ops)
 
     n_bio_tcmur_bdevs = max_minor;
 
-    fnode_dev = fuse_node_lookup("/dev");
-    if (!fnode_dev) {
-	pr_err("bio_tcmur_init called before /dev established\n");
-	return -EINVAL;
-    }
-
-    fuse_node_ops = fuse_ops;
-
     bio_enabled = true;
     return 0;
 }
@@ -363,10 +333,10 @@ error_t
 bio_tcmur_exit(void)
 {
     int i;
-    assert_ne(bio_enabled, 0);		/* not initialized */
-    assert_ne(the_bio_tcmur_bdevs, 0);
-    assert_ne(n_bio_tcmur_bdevs, 0);
-    assert_ne(op_cache, 0);
+    assert(bio_enabled);		/* not initialized */
+    assert(the_bio_tcmur_bdevs);
+    assert(n_bio_tcmur_bdevs);
+    assert(op_cache);
 
     for (i = 0; i < n_bio_tcmur_bdevs; i++)
 	if (the_bio_tcmur_bdevs[i])

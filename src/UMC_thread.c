@@ -340,7 +340,6 @@ UMC_kthread_run(error_t (*fn)(void * env), void * env, char * name, sstring_t ca
 {
     struct task_struct * task = _kthread_create(fn, env, name, caller_id);
     assert(task);
-    kthread_start(task);
     _kthread_start(task, caller_id);
     return task;
 }
@@ -501,7 +500,7 @@ UMC_alarm_handler(void * const v_timer, uint64_t const now, error_t const err)
 
     //XXXXX A very recent call to mod_timer() may have updated the expire time
     // assert(time_after_eq(now, jiffies_to_sys_time(timer->expires)));
-    assert_ne(timer->function, 0);
+    assert(timer->function);
     timer->alarm = NULL;
 
     timer->function(timer->data);

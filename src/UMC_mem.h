@@ -29,6 +29,11 @@
 
 #define __vmalloc(size, gfp, prot)	(_USE(prot), kalloc((size), (gfp)))
 
+#define record_alloc_uninit(ptr_var)	((typeof(ptr_var))sys_mem_alloc(sizeof(*(ptr_var))))
+#define record_alloc(ptr_var)		((typeof(ptr_var))sys_mem_zalloc(sizeof(*(ptr_var))))
+#define record_free(ptr_var)		sys_mem_free(ptr_var)
+#define record_zero(ptr_var)		memset((ptr_var), 0, sizeof(*(ptr_var)))
+
 #ifndef PAGE_SHIFT
 #define PAGE_SHIFT			12U	/* need not match real kernel */
 #endif

@@ -172,7 +172,6 @@ struct gendisk {
 #define disk_to_dev(disk)		((disk)->part0.__dev)
 #define disk_to_bdev(disk)		((disk)->bdev)
 
-#define set_capacity(disk, nsectors)	((disk)->part0.nr_sects = (nsectors))
 #define get_capacity(disk)		((disk)->part0.nr_sects)
 
 #define set_disk_ro(disk, flag)		((disk)->part0.policy = (flag))
@@ -204,7 +203,7 @@ struct block_device {
 };
 
 #define block_size(bdev)		((bdev)->bd_block_size)
-#define bdev_size(bdev)			((bdev)->bd_disk->part0.nr_sects << 9)
+#define bdev_size(bdev)			((bdev)->bd_inode->i_size)
 
 #define bdev_get_queue(bdev)		((bdev)->bd_disk->queue)
 #define bdev_discard_alignment(bdev)	bdev_get_queue(bdev)->limits.discard_alignment
@@ -212,6 +211,15 @@ struct block_device {
 	    ({ snprintf((buf), BDEVNAME_SIZE, "%s", (bdev)->bd_disk->disk_name); (buf); })
 
 #define bdev_read_only(bdev)		((bdev)->bd_disk->part0.policy != 0)
+
+static inline void
+set_capacity(struct gendisk * disk, sector_t nsectors)
+{
+    struct fuse_node * fnode = disk->bdev->bd_inode->pde;
+    disk->part0.nr_sects = nsectors;
+    disk->bdev->bd_inode->i_size = nsectors << 9;
+    fuse_node_update_size(fnode, nsectors << 9);
+}
 
 extern int blkdev_put(struct block_device *bdev, fmode_t fmode);
 
@@ -244,17 +252,11 @@ extern struct block_device * open_bdev_exclusive(const char * path, fmode_t, voi
 extern void close_bdev_exclusive(struct block_device * bdev, fmode_t);
 
 extern struct block_device * bdev_complex(const char * diskname, int major, int minor,
-					error_t (*mk)(struct request_queue *, struct bio *));
+					error_t (*mk)(struct request_queue *, struct bio *),
+					int blkbits, size_t dev_size);
 extern void bdev_complex_free(struct block_device *);
 
-//XXXXX Figure out how this connection is made in a real kernel
-static inline void
-UMC_link_disk_to_bdev(struct gendisk * disk, struct block_device * bdev)
-{
-    disk_to_bdev(disk) = bdev;
-    disk_to_bdev(disk)->bd_disk = disk;
-    disk_to_bdev(disk)->bd_inode->i_mode = S_IFBLK | (false ? 0440 : 0660);   //XXXX
-}
+extern void UMC_link_disk_to_bdev(struct gendisk *, struct block_device *);
 
 /*** Block I/O ***/
 
@@ -326,7 +328,7 @@ enum bio_rw_flags {
 //	BIO_RW_FAILFAST_DRIVER = 3,
 	BIO_RW_FAILFAST = 3,		// scst_vdisk.c
 	BIO_RW_AHEAD = 4,		// drbd_wrappers.h
-	BIO_RW_BARRIER = 5,
+	BIO_RW_BARRIER = 5,		// DRBD rejects this
 	BIO_RW_SYNCIO = 6,		// drbd_wrappers.h
 	BIO_RW_UNPLUG = 7,		// drbd_wrappers.h
 	BIO_RW_META = 8,		// scst_vdisk.c
@@ -342,7 +344,9 @@ enum bio_rw_flags {
 
 #define READ				0
 #define WRITE				1
-#define REQ_FUA				0x100
+#define REQ_BARRIER			(1u<<BIO_RW_BARRIER)
+#define REQ_FUA				0x2000
+//#define REQ_FLUSH			0x1000000
 
 // drbd_wrappers.h
 #define WRITE_SYNC_PLUG			(WRITE | (1 << BIO_RW_SYNCIO))
@@ -351,7 +355,7 @@ enum bio_rw_flags {
 
 static inline bool bio_rw_flagged(struct bio *bio, enum bio_rw_flags flag)
 {
-	return (bio->bi_rw & (1<<flag)) != 0;
+	return (bio->bi_rw & (1ul<<flag)) != 0;
 }
 
 #define bio_iovec_idx(bio, idx)	(&((bio)->bi_io_vec[(idx)]))
@@ -362,7 +366,7 @@ static inline bool bio_rw_flagged(struct bio *bio, enum bio_rw_flags flag)
 #define bio_sectors(bio)	((bio)->bi_size >> 9)
 
 #define bio_has_data(bio)	((bio)->bi_size != 0)
-#define bio_empty_barrier(bio)	(bio_rw_flagged(bio, BIO_RW_BARRIER) && !bio_has_data(bio))
+#define bio_empty_barrier(bio)	(bio_rw_flagged(bio, REQ_BARRIER) && !bio_has_data(bio))
 
 #define bio_flagged(bio, bitno)		(((bio)->bi_flags &   (1<<(bitno))) != 0)
 #define bio_set_flag(bio, bitno)	(((bio)->bi_flags |=  (1<<(bitno))))
@@ -371,8 +375,8 @@ static inline bool bio_rw_flagged(struct bio *bio, enum bio_rw_flags flag)
 #define BIO_MAX_PAGES			1024
 
 #define UMC_bio_op(bio)			((bio)->bi_rw)	//XXXXX ?
-#define op_is_sync(op)			(((op) & (1<<BIO_RW_BARRIER)) != 0)
-#define op_is_write(op)			(((op) & (1<<BIO_RW)) != 0)
+#define op_is_sync(op)			(((op) & REQ_BARRIER) != 0)
+#define op_is_write(op)			(((op) & WRITE) != 0)
 #define bio_data_dir(bio)		(op_is_write(UMC_bio_op(bio)) ? WRITE : READ)
 #define bio_get_nr_vecs(bdev)		BIO_MAX_PAGES
 
@@ -418,7 +422,7 @@ __bio_add_page(struct bio *bio, struct page *page, unsigned int len, unsigned in
 {
     struct bio_vec *bv = &bio->bi_io_vec[bio->bi_vcnt];
 
-    WARN_ONCE(bio_flagged(bio, BIO_CLONED), "adding pages to a cloned bio");
+    WARN_ONCE(bio_flagged(bio, BIO_CLONED), "adding pages to a cloned bio\n");
     assert_lt(bio->bi_vcnt, bio->bi_max_vecs);
 
     bv->bv_page = page;

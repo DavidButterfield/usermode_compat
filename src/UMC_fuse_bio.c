@@ -1,4 +1,4 @@
-/* fuse_bio.c -- translate fuse_node_ops into bio operations
+/* fuse_bio.c -- translate file_operations into bio operations
  *
  * Copyright 2019 David A. Butterfield
  *
@@ -15,26 +15,12 @@
 #include <errno.h>
 
 #include "UMC_bio.h"
+#include "UMC_file.h"
 #include "UMC_thread.h"
 #include "fuse_tree.h"
 #include "fuse_tcmur.h"
 
 #define trace_bio(args...)		//	nlprintk(args)
-
-static error_t
-fuse_bio_open(fuse_node_t fnode, uintptr_t bdev_uip)
-{
-    struct block_device * bdev = (struct block_device *)bdev_uip;
-    return bdev->bd_disk->fops->open(bdev, bdev->bd_inode->i_mode);
-}
-
-static error_t
-fuse_bio_release(fuse_node_t fnode, uintptr_t bdev_uip)
-{
-    struct block_device * bdev = (struct block_device *)bdev_uip;
-    bdev->bd_disk->fops->release(bdev->bd_disk, bdev->bd_inode->i_mode);
-    return 0;
-}
 
 static void
 fuse_bio_endio(struct bio * bio, error_t err)
@@ -160,32 +146,32 @@ fuse_bio_io(struct block_device * bdev, char * buf, size_t iosize, off_t ofs, in
 }
 
 static ssize_t
-fuse_bio_read(uintptr_t bdev_uip, void * buf, size_t iosize, off_t ofs)
+fuse_bio_read(struct file * file, void * buf, size_t iosize, off_t *ofsp)
 {
-    struct block_device * bdev = (struct block_device *)bdev_uip;
-    ssize_t ret = fuse_bio_io(bdev, buf, iosize, ofs, READ);
+    struct block_device * bdev = (struct block_device *)file_pde_data(file);
+    ssize_t ret = fuse_bio_io(bdev, buf, iosize, *ofsp, READ);
     if (ret < 0)
 	pr_warning("READ FAILED %ld: (minor %d) %ld @%ld\n",
-		    ret, bdev->bd_disk->first_minor, iosize, ofs);
+		    ret, bdev->bd_disk->first_minor, iosize, *ofsp);
     return ret;
 }
 
 static ssize_t
-fuse_bio_write(uintptr_t bdev_uip, const char * buf, size_t iosize, off_t ofs)
+fuse_bio_write(struct file * file, const char * buf, size_t iosize, off_t *ofsp)
 {
-    struct block_device * bdev = (struct block_device *)bdev_uip;
-    ssize_t ret = fuse_bio_io(bdev, _unconstify(buf), iosize, ofs, WRITE);
+    struct block_device * bdev = (struct block_device *)file_pde_data(file);
+    ssize_t ret = fuse_bio_io(bdev, _unconstify(buf), iosize, *ofsp, WRITE);
     if (ret < 0)
 	pr_warning("WRITE FAILED %ld: (minor %d) %ld @%ld\n",
-		    ret, bdev->bd_disk->first_minor, iosize, ofs);
+		    ret, bdev->bd_disk->first_minor, iosize, *ofsp);
     return ret;
 }
 
 static error_t
-fuse_bio_fsync(uintptr_t bdev_uip, int datasync)
+fuse_bio_fsync(struct file * file, int datasync)
 {
-    struct block_device * bdev = (struct block_device *)bdev_uip;
-    ssize_t ret = _fuse_bio_io(bdev, NULL, 0, 0, BIO_RW_BARRIER);
+    struct block_device * bdev = (struct block_device *)file_pde_data(file);
+    ssize_t ret = _fuse_bio_io(bdev, NULL, 0, 0, WRITE|REQ_BARRIER);
     assert_le(ret, 0);
     if (ret < 0)
 	pr_warning("FSYNC FAILED %ld: (minor %d)\n",
@@ -193,7 +179,22 @@ fuse_bio_fsync(uintptr_t bdev_uip, int datasync)
     return (error_t)ret;
 }
 
-struct fuse_node_ops fuse_bio_ops = {
+static error_t
+fuse_bio_open(struct inode * unused, struct file * file)
+{
+    struct block_device * bdev = (struct block_device *)file_pde_data(file);
+    return bdev->bd_disk->fops->open(bdev, bdev->bd_inode->i_mode);
+}
+
+static error_t
+fuse_bio_release(struct inode * unused, struct file * file)
+{
+    struct block_device * bdev = (struct block_device *)file_pde_data(file);
+    bdev->bd_disk->fops->release(bdev->bd_disk, bdev->bd_inode->i_mode);
+    return 0;
+}
+
+struct file_operations fuse_bio_ops = {
     .open = fuse_bio_open,
     .release = fuse_bio_release,
     .read = fuse_bio_read,

@@ -30,7 +30,7 @@ struct inode {
     unsigned int		i_blkbits;	/* log2(block_size) */
     dev_t			i_rdev;		/* device major/minor */
 
-    struct proc_dir_entry     * pde;		/* when I_TYPE_PROC */
+    struct fuse_node	      * pde;		/* when I_TYPE_PROC */
 
     void			(*UMC_destructor)(struct inode *);
 
@@ -64,20 +64,20 @@ init_inode(struct inode * inode, int type, umode_t mode,
     inode->i_size = size;
     inode->i_flags = oflags;
     mutex_init(&inode->i_mutex);
-    inode->i_atime = inode->i_mtime = inode->i_ctime = sys_time_delta_to_sec(sys_time_now());
+    inode->i_atime = inode->i_mtime = inode->i_ctime = time(NULL);
 }
 
 static inline void
 _iget(struct inode * inode)
 {
-    assert_ne(inode, 0);
+    assert(inode);
     atomic_inc(&inode->i_count);
 }
 
 static inline void
 iput(struct inode * inode)
 {
-    assert_ne(inode, 0);
+    assert(inode);
     if (!atomic_dec_and_test(&inode->i_count))
 	return;
 

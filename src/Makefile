@@ -127,11 +127,11 @@ MY_CFLAGS += -I$(TCMUR_SRC) -I$(TCMUR_SRC)/ccan -I$(LIBTCMUR)
 
 all:	check_kcopy check_MTE
 	$(MAKE) cscope
-	$(MAKE) -C $(LIBTCMUR)
+	$(MAKE) -C $(LIBTCMUR) CONFIG_BIO=1 libfusetree.a libtcmur.a
 	$(MAKE) usermode_lib.a
 
 usermode_lib.a: .depend $(OBJS_D) $(OBJS_LIBTCMUR)
-	$(LD) -d -z now -O 1 -E -r -o $@ $(OBJS_D) $(OBJS_LIBTCMUR)
+	$(LD) -d -z now -O 1 -E -r -o $@ $(OBJS_D) -whole-archive $(OBJS_LIBTCMUR) -no-whole-archive
 
 check_kcopy:
 	@if [[ ! -d include ]] ; then $(MAKE) kcopy; fi
@@ -155,6 +155,7 @@ endif
 clean:
 	rm -f *.o *.a *.so .depend
 	rm -f tags cscope.out
+	$(MAKE) -C $(LIBTCMUR) $@
 
 extraclean: clean
 	rm -f *.orig *.rej

@@ -48,8 +48,8 @@ struct ahash_request { };
 #define crypto_ahash_update(h)				UMC_STUB(crypto_ahash_update)
 #define crypto_alloc_ahash(a, b, c)			NULL		//XXX
 #define crypto_alloc_shash(a, b, c)			NULL		//XXX
-#define crypto_free_ahash(h)				UMC_STUB(crypto_free_ahash)
-#define crypto_free_shash(h)				UMC_STUB(crypto_free_shash)
+#define crypto_free_ahash(h)				DO_NOTHING()
+#define crypto_free_shash(h)				DO_NOTHING()
 #define crypto_shash_descsize(h)			UMC_STUB(crypto_shash_descsize)
 
 #define generic_unplug_device(q)	DO_NOTHING()

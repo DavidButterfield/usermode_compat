@@ -304,7 +304,7 @@ restart:
 	    skipbytes -= msg->msg_iov->iov_len;
 	    msg->msg_iov->iov_len = 0;
 	    ++msg->msg_iov;
-	    assert_ne(msg->msg_iovlen, 0);
+	    assert(msg->msg_iovlen);
 	    --msg->msg_iovlen;
 	}
 	if (skipbytes) {
@@ -360,11 +360,11 @@ UMC_kernel_recvmsg(struct socket * sock, struct msghdr * msg, struct kvec * kvec
  * Because our event model here is EDGE TRIGGERED, we can get away with doing nothing
  */
 void UMC_sock_cb_read(struct sock * sk, int obsolete)	\
-	    { WARN_ONCE(true, "fd=%d", sk->fd); }
+	    { WARN_ONCE(true, "[fd=%d]\n", sk->fd); }
 void UMC_sock_cb_write(struct sock * sk)		\
-	    { WARN_ONCE(true, "fd=%d", sk->fd); }
+	    { WARN_ONCE(true, "[fd=%d]\n", sk->fd); }
 void UMC_sock_cb_state(struct sock * sk)		\
-	    { WARN_ONCE(true, "fd=%d", sk->fd); }
+	    { WARN_ONCE(true, "[fd=%d]\n", sk->fd); }
 
 /* Callback on event_task when socket fd ready, dispatches to XMIT and/or RECV sk callback */
 void

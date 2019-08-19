@@ -15,43 +15,22 @@
 #include <stdbool.h>
 #include <errno.h>
 
+#include "UMC_file.h"
 #include "UMC_fuse_proc.h"
 #include "fuse_tree.h"
 
 #define trace_cb(args...)		nlprintk(args)
 #define trace_fuse_thread(args...)	nlprintk(args)
 
-static ssize_t
-fuse_pde_read(uintptr_t pde_arg, void * buf, size_t iosize, off_t ofs)
-{
-    struct proc_dir_entry * pde = (void *)pde_arg;
-    return pde->proc_fops->read(pde->data, buf, iosize, &ofs);
-}
-
-static ssize_t
-fuse_pde_write(uintptr_t pde_arg, const char * buf, size_t iosize, off_t ofs)
-{
-    struct proc_dir_entry * pde = (void *)pde_arg;
-    return pde->proc_fops->write(pde->data, buf, iosize, &ofs);
-}
-
-static struct fuse_node_ops fuse_pde_ops = {
-    .read = fuse_pde_read,
-    .write = fuse_pde_write,
-};
-
-/* add a new fuse/pde node-pair under parent; NULL parent denotes /proc */
+/* Add a new pde node under parent; NULL parent denotes /proc */
 struct proc_dir_entry *
 fuse_pde_add(const char * name, struct proc_dir_entry * parent, umode_t mode,
 		const struct file_operations * proc_fops, void * data)
 {
-    struct proc_dir_entry * pde;
-    fuse_node_t fnode;
     fuse_node_t parent_fnode;
-    uintptr_t pde_uip;
 
     if (parent)
-	parent_fnode = parent->fnode;
+	parent_fnode = parent;
     else
 	parent_fnode = fuse_node_lookup("/proc");
 
@@ -59,26 +38,7 @@ fuse_pde_add(const char * name, struct proc_dir_entry * parent, umode_t mode,
     if (!parent_fnode)
 	return NULL;
 
-    fnode = fuse_node_lookupat(parent_fnode, name);
-    if (fnode) {
-	/* Node already exists -- return it */
-	pde = (void *)(pde_uip = fuse_node_data_get(fnode));
-	assert(pde);
-	assert_eq(pde->fnode, fnode);
-	return pde;
-    }
-
-    /* Create the fuse/pde node pair -- fuse node data points to the pde */
-    pde = record_alloc(pde);
-    pde->proc_fops = proc_fops;
-    pde->data = data;
-    pde->fnode = fuse_node_add(name, parent_fnode, mode, &fuse_pde_ops, (uintptr_t)pde);
-    if (!pde->fnode) {
-	record_free(pde);
-	return NULL;
-    }
-
-    return pde;
+    return fuse_node_add(name, parent_fnode, mode, proc_fops, data);
 }
 
 struct proc_dir_entry *
@@ -90,14 +50,10 @@ fuse_pde_mkdir(const char * name, struct proc_dir_entry * parent)
 error_t
 fuse_pde_remove(const char * name, struct proc_dir_entry * parent)
 {
-    struct proc_dir_entry * pde;
-    fuse_node_t fnode;
     fuse_node_t parent_fnode;
-    error_t err;
-    uintptr_t pde_uip;
 
     if (parent)
-	parent_fnode = parent->fnode;
+	parent_fnode = parent;
     else
 	parent_fnode = fuse_node_lookup("/proc");
 
@@ -105,19 +61,51 @@ fuse_pde_remove(const char * name, struct proc_dir_entry * parent)
     if (!parent_fnode)
 	return -ENOENT;
 
-    fnode = fuse_node_lookupat(parent_fnode, name);
-    if (!fnode)
+    return fuse_node_remove(name, parent_fnode);
+}
+
+/******************************************************************************/
+
+/* Add a new node under parent; NULL parent denotes /dev */
+struct proc_dir_entry *
+fuse_dev_add(const char * name, struct proc_dir_entry * parent, umode_t mode,
+		const struct file_operations * proc_fops, void * data)
+{
+    fuse_node_t parent_fnode;
+
+    if (parent)
+	parent_fnode = parent;
+    else
+	parent_fnode = fuse_node_lookup("/dev");
+
+    expect_ne(parent_fnode, NULL, "cannot find /dev\n%s\n", fuse_tree_fmt());
+    if (!parent_fnode)
+	return NULL;
+
+    return fuse_node_add(name, parent_fnode, mode, &fuse_bio_ops, data);
+}
+
+struct proc_dir_entry *
+fuse_dev_mkdir(const char * name, struct proc_dir_entry * parent)
+{
+    return fuse_dev_add(name, parent, S_IFDIR|0555, NULL, NULL);
+}
+
+error_t
+fuse_dev_remove(const char * name, struct proc_dir_entry * parent)
+{
+    fuse_node_t parent_fnode;
+
+    if (parent)
+	parent_fnode = parent;
+    else
+	parent_fnode = fuse_node_lookup("/dev");
+
+    expect_ne(parent_fnode, NULL, "cannot find /dev\n%s\n", fuse_tree_fmt());
+    if (!parent_fnode)
 	return -ENOENT;
 
-    pde = (void *)(pde_uip = fuse_node_data_get(fnode));
-    assert(pde);
-    assert_eq(pde->fnode, fnode);
-
-    err =  fuse_node_remove(name, parent_fnode);
-    if (!err)
-	record_free(pde);
-
-    return err;
+    return fuse_node_remove(name, parent_fnode);
 }
 
 /******************************************************************************/
@@ -130,19 +118,19 @@ struct varloc {
 };
 
 static ssize_t
-fuse_modparm_read(uintptr_t varloc_arg, void * buf, size_t iosize, off_t ofs)
+fuse_modparm_read(struct file * file, void * buf, size_t iosize, off_t * ofsp)
 {
-    struct varloc * varloc = (void *)varloc_arg;
+    struct varloc * varloc = (void *)file_pde_data(file);
     long long data = 0;
 
-    trace_cb("iosize=%lu, ofs=%lu", iosize, ofs);
-    assert_ne(buf, 0);
+    trace_cb("iosize=%lu, ofs=%lu", iosize, *ofsp);
+    assert(buf);
     verify_ge(sizeof(data), varloc->size);
 
     if (iosize == 0)
 	return -EINVAL;
 
-    if (ofs)
+    if (*ofsp)
 	return 0;	    //XXX good enough?
 
     memcpy(&data, varloc->addr, varloc->size);
@@ -156,19 +144,19 @@ fuse_modparm_read(uintptr_t varloc_arg, void * buf, size_t iosize, off_t ofs)
 }
 
 static ssize_t
-fuse_modparm_write(uintptr_t varloc_arg, const char * buf, size_t iosize, off_t ofs)
+fuse_modparm_write(struct file * file, const char * buf, size_t iosize, off_t * ofsp)
 {
-    struct varloc * varloc = (void *)varloc_arg;
+    struct varloc * varloc = (void *)file_pde_data(file);
     long long data;
 
-    trace_cb("iosize=%lu, ofs=%lu", iosize, ofs);
-    assert_ne(buf, 0);
+    trace_cb("iosize=%lu, ofs=%lu", iosize, *ofsp);
+    assert(buf);
     verify_ge(sizeof(data), varloc->size);
 
     if (iosize == 0)
 	return -EINVAL;
 
-    if (ofs)
+    if (*ofsp)
 	return -EINVAL;
 
     errno = 0;
@@ -183,7 +171,7 @@ fuse_modparm_write(uintptr_t varloc_arg, const char * buf, size_t iosize, off_t 
     return (ssize_t)iosize;
 }
 
-static struct fuse_node_ops fuse_modparm_ops = {
+static struct file_operations fuse_modparm_ops = {
     .read = fuse_modparm_read,
     .write = fuse_modparm_write,
 };
@@ -193,10 +181,12 @@ fuse_modparm_add(const char * name, void * varp, size_t size,
 			umode_t mode, struct module * owner)
 {
     fuse_node_t parent_fnode;
+    struct varloc * varloc;
 
     assert(size == 1 || size == 2 || size == 4 || size == 8, "%ld", size);
 
     parent_fnode = fuse_node_lookup("/sys/module");
+    expect_ne(parent_fnode, NULL);
     if (!parent_fnode)
 	return NULL;
 
@@ -208,11 +198,12 @@ fuse_modparm_add(const char * name, void * varp, size_t size,
     if (!parent_fnode)
 	return NULL;
 
-    struct varloc * varloc = record_alloc(varloc);
+    varloc = record_alloc(varloc);
     varloc->addr = varp;
     varloc->size = size;
+
     varloc->fnode = fuse_node_add(name, parent_fnode, mode,
-				    &fuse_modparm_ops, (uintptr_t)varloc);
+				    &fuse_modparm_ops, varloc);
     if (!varloc->fnode) {
 	record_free(varloc);
 	return NULL;
@@ -224,26 +215,75 @@ fuse_modparm_add(const char * name, void * varp, size_t size,
 error_t
 fuse_modparm_remove(const char * name, struct module * owner)
 {
+    fuse_node_t fnode, parent_fnode;
     error_t err;
     struct varloc * varloc;
-    uintptr_t varloc_uip;
 
-    fuse_node_t fnode = fuse_node_lookup("/sys/module");
-    assert_ne(fnode, 0);
-
-    fnode = fuse_node_lookupat(fnode, owner->name);
-    if (!fnode)
-	return -ENOENT;
-    fnode = fuse_node_lookupat(fnode, "parameters");
-    if (!fnode)
+    parent_fnode = fuse_node_lookup("/sys/module");
+    if (!parent_fnode)
 	return -ENOENT;
 
-    varloc = (void *)(varloc_uip = fuse_node_data_get(fnode));
-    err =  fuse_node_remove(name, fnode);
+    parent_fnode = fuse_node_lookupat(parent_fnode, owner->name);
+    if (!parent_fnode)
+	return -ENOENT;
+
+    parent_fnode = fuse_node_lookupat(parent_fnode, "parameters");
+    if (!parent_fnode)
+	return -ENOENT;
+
+    fnode = fuse_node_lookupat(parent_fnode, name);
+    if (!fnode)
+	return -ENOENT;
+
+    varloc = fuse_node_data_get(fnode);
+    assert(varloc);
+
+    err =  fuse_node_remove(name, parent_fnode);
     if (!err)
 	record_free(varloc);
 
     return err;
+}
+
+/* NULL parent denotes /sys/module */
+struct proc_dir_entry *
+fuse_module_mkdir(struct module * owner)
+{
+    struct proc_dir_entry * pde;
+    fuse_node_t parent_fnode = fuse_node_lookup("/sys/module");
+    expect_ne(parent_fnode, NULL, "cannot find /sys/module\n%s\n",
+				    fuse_tree_fmt());
+    if (!parent_fnode)
+	return NULL;
+
+    pde = fuse_node_add(owner->name, parent_fnode, S_IFDIR|0555, NULL, 0);
+    if (!pde)
+	return NULL;
+
+    return fuse_node_add("parameters", pde, S_IFDIR|0555, NULL, 0);
+}
+
+/* NULL parent denotes /sys/module */
+error_t
+fuse_module_rmdir(struct module * owner)
+{
+    error_t err;
+    fuse_node_t fnode;
+    fuse_node_t parent_fnode = fuse_node_lookup("/sys/module");
+    expect_ne(parent_fnode, NULL, "cannot find /sys/module\n%s\n",
+				    fuse_tree_fmt());
+    if (!parent_fnode)
+	return -ENOENT;
+
+    fnode = fuse_node_lookupat(parent_fnode, owner->name);
+    if (!fnode)
+	return -ENOENT;
+
+    err = fuse_node_remove("parameters", fnode);
+    if (err)
+	return err;
+
+    return fuse_node_remove(owner->name, parent_fnode);
 }
 
 /******************************************************************************/

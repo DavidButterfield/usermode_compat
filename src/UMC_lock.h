@@ -191,7 +191,7 @@ rwlock_drop(rwlock_t * rw, unsigned int ndrop)
 	rw->owner = NULL;
     }
 #ifdef UMC_LOCK_CHECKS
-    unsigned int new_count = atomic_add_return(ndrop, &rw->count);
+    int new_count = atomic_add_return(ndrop, &rw->count);
     verify_le(new_count, _RW_LOCK_WR_COUNT, "too many unlocks?");
 #else
     atomic_add(ndrop, &rw->count);
@@ -489,7 +489,7 @@ struct rcu_head {
 #define list_for_each_entry_rcu(p, h, m) /* _rcu_assert_readlocked(); */ \
 					 list_for_each_entry((p), (h), m)
 
-#define rcu_dereference_protected(p, c) ({ assert_ne(c, 0); (p); })
+#define rcu_dereference_protected(p, c) ({ assert(c); (p); })
 
 /* Writers */
 #define UMC_rcu_write_lock()		write_lock(&UMC_rcu_lock)

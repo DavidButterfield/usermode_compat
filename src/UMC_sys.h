@@ -39,6 +39,7 @@
 
 #define _ASM_GENERIC_BITOPS_HWEIGHT_H_	/* inhibit hweight.h */
 #define __struct_tm_defined		/* inhibit struct_tm.h */
+#define ffs UMC_unused_ffs		/* inhibit defining function ffs in string.h */
 
 /* These headers come from /usr/include */
 #include <features.h>	// otherwise _GNU_SOURCE fails to work
@@ -51,9 +52,12 @@
 
 #include </usr/include/x86_64-linux-gnu/bits/types/struct_iovec.h>  //XXX
 
-#define ffs UMC_unused_ffs		/* inhibit defining function ffs in string.h */
 #include <string.h>
 #undef ffs
+
+#ifndef gettid
+#define gettid()			((pid_t)(syscall(SYS_gettid)))
+#endif
 
 /********** Compiler tricks **********/
 
@@ -169,8 +173,8 @@ typedef unsigned int			fmode_t;
 })
 
 /******************************************************************************/
-
 #include <sys_service.h>    /* system services: event threads, polling, memory, time, etc */
+extern void sys_breakpoint(void);
 
 #include <byteswap.h>
 #include <endian.h>
@@ -262,7 +266,7 @@ typedef unsigned int			fmode_t;
 extern __thread size_t UMC_size_t_JUNK; /* avoid unused-value gcc warnings */
 
 /* For stubbing out functions that if someone calls them we want to know */
-#define UMC_STUB_STR			"XXX XXX XXX XXX XXX UNIMPLEMENTED"
+#define UMC_STUB_STR			"XXX XXX XXX XXX XXX UNIMPLEMENTED "
 #define UMC_STUB(fn, ret...)		({ WARN_ONCE(true, UMC_STUB_STR "FUNCTION %s\n", #fn); \
 					  (UMC_size_t_JUNK=(uintptr_t)IGNORED), ##ret;})
 
@@ -283,14 +287,14 @@ extern __thread size_t UMC_size_t_JUNK; /* avoid unused-value gcc warnings */
 #define UMC_kernelize(callret...) \
 ({ \
     int uk_ret = _UMC_kernelize(callret); \
-    if (uk_ret < 0) \
+    if (uk_ret < 0 && uk_ret != -EAGAIN) \
 	pr_warning("%s returned %d\n", #callret, uk_ret); \
     uk_ret; \
 })
 
 #define UMC_kernelize64(callret...) \
 ({ ssize_t uk64_ret = _UMC_kernelize64(callret); \
-    if (uk64_ret < 0) \
+    if (uk64_ret < 0 && uk64_ret != -EAGAIN) \
 	pr_warning("%s returned %d\n", #callret, uk64_ret); \
     uk64_ret; \
 })

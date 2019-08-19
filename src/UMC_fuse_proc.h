@@ -61,18 +61,18 @@ extern struct list_head * seq_list_next(void *v, struct list_head *head, loff_t 
 extern void seq_fmt(struct seq_file * seq);
 extern ssize_t seq_read(struct file * file, void * buf, size_t size, loff_t * lofsp);
 
+/******************************************************************************/
+
 /* Map fuse_tree_op to /proc file_operations */
-struct proc_dir_entry {
-    const struct file_operations      * proc_fops;
-    void			      * data;	    // scst/src/scst_proc.c
-    struct module                     * owner;	    // scsi-scst/kernel/config.c
-    struct fuse_node                  * fnode;
-};
+#define proc_dir_entry fuse_node
 
 /* NULL parent refers to the /proc node */
 extern struct proc_dir_entry * fuse_pde_add(const char * name,
 		struct proc_dir_entry * parent, umode_t mode,
 		const struct file_operations * fops, void * data);
+
+extern struct proc_dir_entry *
+fuse_pde_mkdir(const char * name, struct proc_dir_entry * parent);
 
 extern error_t fuse_pde_remove(const char * name, struct proc_dir_entry * parent);
 
@@ -85,14 +85,24 @@ extern error_t fuse_pde_remove(const char * name, struct proc_dir_entry * parent
 #define create_proc_entry(name, mode, parent) \
 		proc_create_data((name), (mode), (parent), NULL, NULL)
 
-extern struct proc_dir_entry *
-fuse_pde_mkdir(const char * name, struct proc_dir_entry * parent);
-
 #define proc_mkdir(name, parent) fuse_pde_mkdir((name), (parent))
 
 #define remove_proc_entry(name, parent) fuse_pde_remove((name), (parent))
 
+/* NULL parent refers to the /dev node */
+extern struct proc_dir_entry * fuse_dev_add(const char * name,
+		struct proc_dir_entry * parent, umode_t mode,
+		const struct file_operations * fops, void * data);
+
+extern struct proc_dir_entry *
+fuse_dev_mkdir(const char * name, struct proc_dir_entry * parent);
+
+extern error_t fuse_dev_remove(const char * name, struct proc_dir_entry * parent);
+
 /******************************************************************************/
+
+extern struct proc_dir_entry * fuse_module_mkdir(struct module *);
+extern error_t fuse_module_rmdir(struct module *);
 
 /* These are for accessing "module_param_named" variables */
 extern fuse_node_t fuse_modparm_add(const char *, void *, size_t, umode_t, struct module *);
@@ -120,6 +130,8 @@ extern error_t fuse_modparm_remove(const char * name, struct module *);
 	}
 
 #define module_param(var, type, mode)	module_param_named(var, var, type, (mode))
+
+/******************************************************************************/
 
 /* SCST utters PROC_I(inode)->pde->data */
 #define PROC_I(inode)	({ assert_eq((inode)->UMC_type, I_TYPE_PROC); (inode); })

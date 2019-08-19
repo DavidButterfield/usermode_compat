@@ -8,6 +8,9 @@
  */
 #define _GNU_SOURCE
 #include "UMC_bio.h"
+#include "UMC_file.h"
+#include "UMC_fuse_proc.h"
+#include "fuse_tree.h"
 
 #define trace_bdev(fmtargs...)		nlprintk(fmtargs)
 
@@ -17,7 +20,7 @@ DEFINE_SPINLOCK(UMC_pagelist_lock);
 uint8_t __aligned(PAGE_SIZE) empty_zero_page[PAGE_SIZE];
 struct page zero_page;
 
-const char * UMC_fuse_mount_point = "/tcmur";	//XXXXXX
+const char * UMC_fuse_mount_point = "/UMCfuse";	//XXXXXX
 
 static void
 bdev_inode_destructor(struct inode * inode)
@@ -61,7 +64,7 @@ lookup_bdev(const char * path, bool exclusive)
 
     if (strncmp(path, prefix, strlen(prefix))) {
 	pr_warning("Bad device name prefix: %s\n", path);
-	return NULL;
+	return ERR_PTR(-EINVAL);
     }
 
     p = path + strlen(prefix);	/* skip prefix to name under /dev */
@@ -76,13 +79,22 @@ lookup_bdev(const char * path, bool exclusive)
 	}
 
     if (bdev) {
-	if (bdev->is_open_exclusive)
+#if 0
+	//XXXXXX barf.  This has to allow the same "holder" to open multiply
+	if (bdev->is_open_exclusive) {
+	    pr_warning("bdev is already open exclusive, want=%d\n", exclusive);
+	    sys_breakpoint();
 	    bdev = ERR_PTR(-EBUSY);
-	else if (exclusive && atomic_get(&bdev->bd_inode->i_count) > 1)
+	} else if (exclusive && atomic_get(&bdev->bd_inode->i_count) > 1) {
+	    pr_warning("bdev exclusive wanted but already open count=%d\n",
+				atomic_get(&bdev->bd_inode->i_count));
 	    bdev = ERR_PTR(-EBUSY);
-	else {
+	} else
+#endif
+	{
+	    trace_bdev("OPEN name='%s' exclusive=%d", bdev->bd_disk->disk_name, exclusive);
 	    bdev->is_open_exclusive = exclusive;
-	    bdgrab(bdev);
+	    bdgrab(bdev);   /* ++refcount */
 	}
     } else
 	bdev = ERR_PTR(-ENOENT);
@@ -106,6 +118,7 @@ _open_bdev(const char *path, fmode_t fmode)
 
     if ((fmode & FMODE_WRITE) && bdev_read_only(bdev)) {
 	    trace_err("****************** bdev %s says it is readonly", path);
+	    bdev->is_open_exclusive = false;
 	    bdput(bdev);
 	    return ERR_PTR(-EACCES);	//XXX -EROFS ?
     }
@@ -119,6 +132,7 @@ _open_bdev(const char *path, fmode_t fmode)
     int error = bdev->bd_disk->fops->open(bdev, fmode);
     if (error) {
 	pr_warning("****************** bdev %s failed fops->open() %d\n", path, error);
+	bdev->is_open_exclusive = false;
 	bdput(bdev);
 	return ERR_PTR(error);
     }
@@ -151,7 +165,9 @@ _close_bdev(struct block_device * bdev, fmode_t fmode)
     if (disk->fops->release)
 	ret = disk->fops->release(disk, fmode);
 
-    bdput(bdev);	/* --refcount */
+    bdev->is_open_exclusive = false;
+
+    bdput(bdev);    /* --refcount */
     return ret;
 }
 
@@ -195,6 +211,11 @@ put_disk(struct gendisk * disk)
 void
 del_gendisk(struct gendisk * disk)
 {
+    error_t err = fuse_dev_remove(disk->disk_name, NULL);
+    if (err)
+	pr_warning("Cannot remove %s minor %d: %s\n",
+		    disk->disk_name, disk->first_minor, strerror(-err));
+
     spin_lock(&UMC_disk_list_lock);
     list_del(&disk->disk_list);		/* remove from UMC_disk_list */
     spin_unlock(&UMC_disk_list_lock);
@@ -209,22 +230,40 @@ add_disk(struct gendisk * disk)
     struct device *dev = disk_to_dev(disk);
     dev->devt = devt;
     dev->parent = NULL;
+
     spin_lock(&UMC_disk_list_lock);
     list_add(&disk->disk_list, &UMC_disk_list);
     spin_unlock(&UMC_disk_list_lock);
 }
 
+//XXXXX Figure out how this connection is made in a real kernel
+void
+UMC_link_disk_to_bdev(struct gendisk * disk, struct block_device * bdev)
+{
+    disk_to_bdev(disk) = bdev;
+    bdev->bd_disk = disk;
+    bdev->bd_inode->i_mode = S_IFBLK | (bdev_read_only(bdev) ? 0440 : 0660);
+    bdev->bd_inode->pde = fuse_dev_add(disk->disk_name, NULL,
+				bdev->bd_inode->i_mode, &fuse_bio_ops, bdev);
+    if (bdev->bd_inode->pde) {
+	fuse_node_update_block_size(bdev->bd_inode->pde, block_size(bdev));
+    } else
+	pr_warning("Failed to add fuse node for %s minor %d\n",
+		    disk->disk_name, disk->first_minor);
+}
+
 /* Create a collection of structures surrounding a bdev */
 struct block_device *
 bdev_complex(const char * diskname, int major, int minor,
-		error_t (*mk)(struct request_queue *, struct bio *))
+		error_t (*mk)(struct request_queue *, struct bio *),
+		int blkbits, size_t dev_size)
 {
     struct device * dev;
     struct block_device *bdev;
     struct gendisk * disk = alloc_disk(1);  /* allocates gendisk and dev */
     disk->major = major;
     disk->first_minor = minor;
-    memcpy(disk->disk_name, diskname, sizeof(disk->disk_name)-1);
+    strncpy(disk->disk_name, diskname, sizeof(disk->disk_name)-1);
 
     disk->queue = blk_alloc_queue(0);
     disk->queue->make_request_fn = mk;
@@ -234,10 +273,12 @@ bdev_complex(const char * diskname, int major, int minor,
     dev = disk_to_dev(disk);
     bdev = bdget(dev->devt);	/* creates bdev and inode */
     bdev->bd_contains = bdev;
+    bdev->bd_block_size = 1u << blkbits;
+    bdev->bd_inode->i_blkbits = blkbits;
 
-    disk_to_bdev(disk) = bdev;
-    disk_to_bdev(disk)->bd_disk = disk;
+    UMC_link_disk_to_bdev(disk, bdev);
 
+    set_capacity(disk, dev_size >> 9);
     return bdev;
 }
 
@@ -251,9 +292,8 @@ bdev_complex_free(struct block_device * bdev)
 }
 
 void
-bio_free(struct bio *bio, struct bio_set *bs)
+bio_free(struct bio *bio, struct bio_set *bs_ignored)
 {
-    assert_eq(bs, NULL);
     assert_eq(atomic_read(&bio->bi_cnt), 0);
     kfree(bio);
 }

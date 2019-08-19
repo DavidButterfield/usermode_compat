@@ -19,7 +19,7 @@
 #define S_IWUGO				(S_IWUSR|S_IWGRP|S_IWOTH)
 
 struct file {
-//  struct kref			kref;		//XXX struct file not kref'd
+//  struct kref			kref;		//XXX no dup(2) emulation
     void		      * private_data;	/* e.g. seq_file */
     struct inode	      * inode;
     fmode_t			f_openmode;
@@ -29,6 +29,9 @@ struct file {
 };
 
 #define file_inode(file)		((file)->inode)
+#define file_pde(file)			(file_inode(file)->pde)
+#define file_pde_data(file)		(file_pde(file)->data)
+
 #define file_accessed(filp)		DO_NOTHING()
 
 struct file_operations {

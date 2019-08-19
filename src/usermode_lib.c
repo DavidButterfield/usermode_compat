@@ -66,7 +66,7 @@ UMC_init(const char * mountpoint)
 	fuse_tree_mkdir("module", fnode_sys);
 
 	/* bio_tcmur_init() after /dev established */
-	err = bio_tcmur_init(tcmur_major, tcmur_max_minor, &fuse_bio_ops);
+	err = bio_tcmur_init(tcmur_major, tcmur_max_minor);
 	verify_eq(err, 0, "bio_tcmur_init");
 
 	err = fuse_bio_init();
@@ -101,7 +101,7 @@ error_t
 UMC_exit(void)
 {
     error_t err;
-    assert_ne(current, 0);
+    assert(current);
 
     netlink_exit();
 
@@ -123,6 +123,7 @@ UMC_exit(void)
 	    err = bio_tcmur_exit();
 	    expect_eq(err, 0, "bio_tcmur_exit");
 
+	    fuse_tree_rmdir("proc", NULL);
 	    fuse_tree_rmdir("dev", NULL);
 	    fuse_node_t fnode_sys = fuse_node_lookup("sys");
 	    fuse_tree_rmdir("module", fnode_sys);
