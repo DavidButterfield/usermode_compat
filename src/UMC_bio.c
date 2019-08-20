@@ -92,7 +92,8 @@ lookup_bdev(const char * path, bool exclusive)
 	} else
 #endif
 	{
-	    trace_bdev("OPEN name='%s' exclusive=%d", bdev->bd_disk->disk_name, exclusive);
+	    trace_bdev("Lookup succeeds name='%s' exclusive=%d",
+			bdev->bd_disk->disk_name, exclusive);
 	    bdev->is_open_exclusive = exclusive;
 	    bdgrab(bdev);   /* ++refcount */
 	}
@@ -137,7 +138,7 @@ _open_bdev(const char *path, fmode_t fmode)
 	return ERR_PTR(error);
     }
 
-    trace_bdev("name='%s' size=%"PRIu64, bdev->bd_disk->disk_name, bdev_size(bdev));
+    trace_bdev("Open name='%s' size=%"PRIu64, bdev->bd_disk->disk_name, bdev_size(bdev));
 
     return bdev;
 }
@@ -160,7 +161,7 @@ _close_bdev(struct block_device * bdev, fmode_t fmode)
     assert(disk);
     assert(disk->fops);
     expect_ne(disk->fops->release, NULL);
-    trace_bdev("name='%s' size=%"PRIu64, disk->disk_name, bdev_size(bdev));
+    trace_bdev("Close name='%s' size=%"PRIu64, disk->disk_name, bdev_size(bdev));
 
     if (disk->fops->release)
 	ret = disk->fops->release(disk, fmode);
@@ -285,10 +286,11 @@ bdev_complex(const char * diskname, int major, int minor,
 void
 bdev_complex_free(struct block_device * bdev)
 {
-    del_gendisk(bdev->bd_disk);			/* remove disk from list */
-    blk_put_queue(bdev->bd_disk->queue);	/* drop request queue */
-    put_disk(bdev->bd_disk);			/* drop disk and dev */
-    bdput(bdev);				/* drop bdev and inode */
+    struct gendisk * disk = bdev->bd_disk;
+    del_gendisk(disk);			/* remove disk from list */
+    bdput(bdev);			/* drop bdev and inode */
+    blk_put_queue(disk->queue);		/* drop request queue */
+    put_disk(disk);			/* drop disk and dev */
 }
 
 void

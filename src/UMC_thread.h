@@ -12,7 +12,7 @@
 #include <pthread.h>	// pthreads
 #include <signal.h>	// SIGHUP, pthread_kill() XXX
 
-#define trace_thread(args...)		nlprintk(args)
+#define trace_thread(args...)	    //	nlprintk(args)
 
 #define	NR_CPUS				BITS_PER_LONG
 

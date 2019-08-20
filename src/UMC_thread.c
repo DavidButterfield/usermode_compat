@@ -6,7 +6,7 @@
 #include "UMC_thread.h"
 #include "UMC_lock.h"
 
-#define trace_kthread(fmtargs...)	nlprintk(fmtargs)
+#define trace_kthread(fmtargs...)   //	nlprintk(fmtargs)
 #define trace_sig(fmtargs...)		nlprintk(fmtargs)
 
 __thread struct task_struct * current;   /* current task (thread) structure */
@@ -210,7 +210,7 @@ UMC_kthread_fn(void * v_task)
     struct task_struct * task = v_task;
     UMC_current_set(task);
 
-    trace_thread("Thread %s (%u) starts kthread\n", task->comm, task->pid);
+    trace_kthread("Thread %s (%u) starts kthread\n", task->comm, task->pid);
 
     /* Let our creating thread return from kthread_create() */
     complete(&task->started);
@@ -224,7 +224,7 @@ UMC_kthread_fn(void * v_task)
 				      /*** Run the kthread logic ***/
     error_t ret = task->exit_code = task->run_fn(task->run_env);
 
-    trace_thread("Thread %s (%u) EXITS kthread\n", task->comm, task->pid);
+    trace_kthread("Thread %s (%u) EXITS kthread\n", task->comm, task->pid);
 
     /* If this thread is not being stopped by another thread,
      * then do self-cleanup through do_exit()
@@ -259,7 +259,7 @@ _kthread_stop(struct task_struct * task)
 {
     verify(task != current, "task %s (%u) cannot kthread_stop itself",
 			    task->comm, task->pid);
-    trace_thread("kthread_stop by %s (%u) of %s (%u)",
+    trace_kthread("kthread_stop by %s (%u) of %s (%u)",
 		current->comm, current->pid, task->comm, task->pid);
 
     task->should_stop = true;

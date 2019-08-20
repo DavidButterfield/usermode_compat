@@ -163,7 +163,9 @@ typedef unsigned int			fmode_t;
     len;								    \
 })
 
-#define sys_buf_allocator_set(buf, id)
+//XXX ADD mem_buf_allocator_set() to the sys_services API
+extern void _mem_buf_allocator_set(void * buf, const char * caller_id);
+#define sys_buf_allocator_set(buf, caller_id) _mem_buf_allocator_set((buf), (caller_id))
 
 //XXXX This bogus hack reply works for the one place it gets called from
 #define sys_buf_cache_size(cache) ({ \

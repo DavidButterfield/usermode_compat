@@ -502,7 +502,6 @@ typedef u8				blk_status_t;
 #define BLK_STS_RESOURCE	9
 #define BLK_STS_IOERR		10
 
-#define blk_put_queue(q)		kobject_put(&(q)->kobj)
 #define blk_cleanup_queue(q)		blk_put_queue(q)
 
 #define blk_bidi_rq(rq)                ((rq)->next_rq != NULL)
