@@ -9,8 +9,8 @@
 #ifndef UMC_THREAD_H
 #define UMC_THREAD_H
 #include "UMC_sys.h"
-#include <pthread.h>	// pthreads
-#include <signal.h>	// SIGHUP, pthread_kill() XXX
+#include <pthread.h>
+#include <signal.h>
 
 #define trace_thread(args...)	    //	nlprintk(args)
 
@@ -18,8 +18,9 @@
 
 struct mutex {
     struct task_struct       * volatile owner;		/* exclusive holder, if any */
-    pthread_mutex_t		        lock;
+    struct task_struct       * volatile nestor;		/* last nestor, if any */
     atomic_t				nest;		/* lock nest monster (for spinlock) */
+    pthread_mutex_t		        lock;
     sstring_t				name;
     sstring_t				last_locker;	/* FILE:LINE of last locker */
 };
@@ -341,13 +342,11 @@ do { \
  */
 #define wake_up_one(WAITQ) \
 	    do { \
-		/* if (unlikely(!(WAITQ)->initialized)) sys_breakpoint(); */ \
 		pthread_cond_signal(&(WAITQ)->pcond); \
 	    } while (0)
 
 #define wake_up_all(WAITQ) \
 	    do { \
-		/* if (unlikely(!(WAITQ)->initialized)) sys_breakpoint(); */ \
 		pthread_cond_broadcast(&(WAITQ)->pcond); \
 	    } while (0)
 
@@ -551,7 +550,7 @@ extern error_t UMC_tasklet_thr(void * v_tasklet);
 #ifndef UMC_TASKLETS
 #define tasklet_init(x, y, z)		DO_NOTHING()
 #define tasklet_schedule(tasklet)	UMC_STUB(tasklet)
-#define tasklet_kill(tasklet)		UMC_STUB(tasklet)
+#define tasklet_kill(tasklet)		DO_NOTHING()
 #else	/* UMC_TASKLETS */
 
 #define tasklet_init(tasklet, fn, arg)	    __tasklet_init((tasklet), (fn), (arg), #fn)
@@ -904,6 +903,6 @@ num_online_cpus(void)
 #define in_interrupt()			(in_irq() || in_softirq())
 
 #define need_resched()			false
-#define cond_resched()			DO_NOTHING()	//XXXX ?
+#define cond_resched()			DO_NOTHING()	//XXXX OK?
 
 #endif /* UMC_THREAD_H */

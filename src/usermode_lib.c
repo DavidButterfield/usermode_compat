@@ -19,19 +19,6 @@ UMC_init(const char * mountpoint)
 
     idr_init_cache();
 
-    /* Initialize a page of zeros for general use */
-    {
-	struct page * page = &zero_page;
-	kref_init(&page->kref);
-	mutex_init(&page->lock);
-	page->order = 0;	/* single page */
-	page_address(page) = empty_zero_page;
-	//XXX is this really supposed to be on UMC_page_list?
-	spin_lock(&UMC_pagelist_lock);
-	list_add(&page->UMC_page_list, &UMC_pagelist);
-	spin_unlock(&UMC_pagelist_lock);
-    }
-
     /* Set up "current" for this initial thread */
     assert_eq(current, NULL);
     UMC_current_init(&UMC_init_current_space, sys_thread_current(),
@@ -46,17 +33,31 @@ UMC_init(const char * mountpoint)
 
     UMC_sig_setup();
 
+    /* Initialize a page of zeros for general use */
+    {
+	struct page * page = &zero_page;
+	kref_init(&page->kref);
+	mutex_init(&page->lock);
+	page->order = 0;	/* single page */
+	page_address(page) = empty_zero_page;
+	//XXX is this really supposed to be on UMC_page_list?
+	spin_lock(&UMC_pagelist_lock);
+	list_add(&page->UMC_page_list, &UMC_pagelist);
+	spin_unlock(&UMC_pagelist_lock);
+    }
+
     /* Threads */
 
     /* fuse forks, so start it before anything that opens file descriptors */
     {
 	error_t err;
-	int tcmur_major = 0;			//XXX
-	int tcmur_max_minor = 256;		//XXX
+	int tcmur_major = 0;			//XXXX
+	int tcmur_max_minor = 256;		//XXXX
 
 	err = libtcmur_init(NULL);		/* default handler_prefix */
 	verify_eq(err, 0, "libtcmur_init");
 
+	UMC_fuse_mount_point = mountpoint;
 	err = fuse_tree_init(mountpoint);
 	verify_eq(err, 0, "fuse_tree_init");
 
@@ -111,7 +112,7 @@ UMC_exit(void)
     {
 	err = fuse_thread_stop();
 	if (err == -EINVAL)
-	    { /* XXX Ignore for the SIGINT hack */ }
+	    { /* fuse thread already gone -- ignore the EINVAL */ }
 	else {
 	    expect_eq(err, 0, "fuse_thread_stop");
 	}

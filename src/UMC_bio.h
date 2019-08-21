@@ -15,8 +15,6 @@
 
 #define trace_err(args...)		nlprintk(args)
 
-extern const char * UMC_fuse_mount_point;   /* e.g. "/UMCfuse" *///XXXXXX
-
 /*** Request Queue (mostly unused) ***/
 
 typedef int				(congested_fn)(void *, int);
@@ -243,7 +241,7 @@ bdput(struct block_device * bdev)
 /* Create a block device */
 extern struct block_device * bdget(dev_t devt);
 
-#define fsync_bdev(bdev)		fsync((bdev)->bd_inode->UMC_fd)	//XXXXX bogus
+#define fsync_bdev(bdev)		fsync((bdev)->bd_inode->UMC_fd)	//XXXXXX bogus!
 
 extern struct block_device * _open_bdev(const char *path, fmode_t fmode);
 extern int _close_bdev(struct block_device * bdev, fmode_t fmode);
@@ -374,7 +372,7 @@ static inline bool bio_rw_flagged(struct bio *bio, enum bio_rw_flags flag)
 
 #define BIO_MAX_PAGES			1024
 
-#define UMC_bio_op(bio)			((bio)->bi_rw)	//XXXXX ?
+#define UMC_bio_op(bio)			((bio)->bi_rw)	//XXXXX right?
 #define op_is_sync(op)			(((op) & REQ_BARRIER) != 0)
 #define op_is_write(op)			(((op) & WRITE) != 0)
 #define bio_data_dir(bio)		(op_is_write(UMC_bio_op(bio)) ? WRITE : READ)
@@ -553,10 +551,10 @@ struct blk_plug { };
 
 #define blkdev_issue_discard(bdev, sector, nr_sects, gfp, flags)    (-EOPNOTSUPP)
 
-#define bd_link_disk_holder(a, b)	0			//XXX
-#define bd_unlink_disk_holder(a, b)	DO_NOTHING()		//XXX
+#define bd_link_disk_holder(a, b)	0			//XXXXX
+#define bd_unlink_disk_holder(a, b)	DO_NOTHING()		//XXXXX
 
-#define bd_claim_by_disk(bde, claim_ptr, vdisk)	0		//XXX
-#define bd_release_from_disk(bde, vdisk)	DO_NOTHING()	//XXX
+#define bd_claim_by_disk(bde, claim_ptr, vdisk)	0		//XXXXX
+#define bd_release_from_disk(bde, vdisk)	DO_NOTHING()	//XXXXX
 
 #endif /* UMC_BIO_H */

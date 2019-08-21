@@ -10,7 +10,7 @@
 #define UMC_FILE_H
 #include "UMC_sys.h"
 #include "UMC_inode.h"
-#include "UMC_bio.h"	    //XXX unfortunate
+#include "UMC_bio.h"
 #include <fcntl.h>	    // open, O_*, etc
 
 #define trace_file(fmtargs...)	    //	nlprintk(fmtargs)
@@ -48,14 +48,7 @@ struct file_operations {
 
 /*** Files on disk, or real block devices ***/
 
-static void
-file_inode_destructor(struct inode * inode)
-{
-    trace_file("CLOSE real file/bdev fd=%d", inode->UMC_fd);
-    assert_ge(inode->UMC_fd, 0);
-    close(inode->UMC_fd);
-    record_free(inode);
-}
+extern void file_inode_destructor(struct inode *);
 
 static inline struct file *
 filp_open_real(const char * name, int flags, umode_t mode)

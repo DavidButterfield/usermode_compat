@@ -91,7 +91,7 @@ UMC_sock_getname(struct socket * sock, struct sockaddr * addr, socklen_t * addrl
 error_t
 UMC_sock_connect(struct socket * sock, struct sockaddr * addr, socklen_t addrlen, int flags)
 {
-    //XXX UMC_sock_connect flags ?
+    //XXX UMC_sock_connect flags are ignored -- needed?
     __attribute__((__unused__))
     struct sockaddr_in * inaddr = (struct sockaddr_in *)addr;
     trace_socket("%s (%d) connecting socket fd=%d to %d.%d.%d.%d port %u",
@@ -121,7 +121,7 @@ UMC_sock_bind(struct socket * sock, struct sockaddr *addr, socklen_t addrlen)
 	if (inaddr->sin_port != 0) {
 	    int optval = true;
 	    //XXX Should leave setting SO_REUSEADDR to the app -- see also SK_CAN_REUSE
-	    UMC_setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));	//XXX
+	    UMC_setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
 	}
 
 	err = UMC_kernelize(bind(sock->sk->fd, addr, addrlen));
@@ -300,7 +300,6 @@ restart:
 	/* Advance the msg by the number of bytes we received into it */
 	size_t skipbytes = (size_t)rc;
 	while (skipbytes && skipbytes >= msg->msg_iov->iov_len) {
-	    // msg->msg_iov->iov_base += msg->msg_iov->iov_len; //XXX needed?
 	    skipbytes -= msg->msg_iov->iov_len;
 	    msg->msg_iov->iov_len = 0;
 	    ++msg->msg_iov;
@@ -323,14 +322,14 @@ restart:
 		if (sock->sk->UMC_rcvtimeo == 0 || sock->sk->UMC_rcvtimeo >= JIFFY_MAX) {
 		    trace_socket("%s: recvmsg ignores -EAGAIN on fd=%d flags=0x%x", caller_id, sock->sk->fd, flags);
 		    usleep(500);	    //XXXXX
-		    goto restart;   //XXX doesn't adjust time remaining
+		    goto restart;   //XXXXX doesn't adjust time remaining
 		}
 		#define T_SLOP jiffies_to_sys_time(1)
 		if (sys_time_now() < t_end - T_SLOP) {
 		    trace_socket("%s: recvmsg ignores early -EAGAIN on fd=%d now=%lu end=%lu flags=0x%x",
 				caller_id, sock->sk->fd, sys_time_now(), t_end, flags);
 		    usleep(500);	    //XXXXX
-		    goto restart;   //XXX doesn't adjust time remaining
+		    goto restart;   //XXXXX doesn't adjust time remaining
 		}
 		trace_socket("%s: recvmsg returns -EAGAIN on fd=%d timeout=%lu jiffies flags=0x%x",
 			    caller_id, sock->sk->fd, sock->sk->sk_rcvtimeo, flags);

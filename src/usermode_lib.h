@@ -29,7 +29,7 @@
     // #include <limits.h>
     // #include <errno.h>
     // #include <stdlib.h>
-    // #include </usr/include/x86_64-linux-gnu/bits/types/struct_iovec.h>  //XXX
+    // #include </usr/include/x86_64-linux-gnu/bits/types/struct_iovec.h>
     // #include <string.h>
     // #include <sys_service.h>
     // #include <byteswap.h>
@@ -71,7 +71,7 @@
 #include "UMC_file.h"		/* interface to real files */
     // #include "UMC_sys.h"
     // #include "UMC_inode.h"
-    // #include "UMC_bio.h"	//XXX unfortunate
+    // #include "UMC_bio.h"
     // #include <fcntl.h>
 
 #include "UMC_socket.h"		/* interface to real sockets */

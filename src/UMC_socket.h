@@ -48,7 +48,7 @@ struct sock {
     unsigned char	    sk_userlocks:4;	    /* unimplemented */
 
     int			    sk_state;		    /* e.g. TCP_ESTABLISHED */
-    rwlock_t		    sk_callback_lock;	    /* protect changes to callbacks */	//XXXXX
+    rwlock_t		    sk_callback_lock;	    /* protect changes to callbacks */	//XXXXX unused!
     void		  * sk_user_data;
     void		  (*sk_data_ready)(struct sock *, int); /* protocol callbacks */
     void		  (*sk_write_space)(struct sock *);
@@ -369,7 +369,7 @@ fput(struct file * sockfile)
     if (sk->rd_poll_event_task) {
 	sys_poll_disable(sk->rd_poll_event_task, sk->rd_poll_entry);
 
-	if (sys_thread_current() != sk->rd_poll_event_thread->SYS)  //XXXXXX
+	if (sys_thread_current() != sk->rd_poll_event_thread->SYS)  //XXX
 	    _fput_finish_work_fn(sk->rd_poll_event_thread);
 	else {
 	    /* irqthread can't shut itself down; use a helper */

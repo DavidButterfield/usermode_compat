@@ -130,9 +130,6 @@ typedef unsigned int			fmode_t;
 #define ____cacheline_aligned		__attribute__((aligned(__CACHE_LINE_BYTES)))
 #define ____cacheline_aligned_in_smp	__attribute__((aligned(SMP_CACHE_BYTES)))
 
-/******************************************************************************/
-//XXX   This mem stuff belongs in sys_service.h   XXX
-
 /* Return a newly-allocated freeable formatted string from the printf-like arguments */
 //XXX These should be non-inline varargs functions (instead of macros)
 
@@ -157,20 +154,23 @@ typedef unsigned int			fmode_t;
     if (len < 0) {							    \
 	*(_retp) = NULL;						    \
     } else {								    \
-	*(_retp) = strncpy(sys_mem_alloc(1 + len), _str, 1 + len);	    \
+	*(_retp) = strncpy(vmalloc(1 + len), _str, 1 + len);	    \
 	free(_str);							    \
     }									    \
     len;								    \
 })
 
-//XXX ADD mem_buf_allocator_set() to the sys_services API
+/******************************************************************************/
+
+//XXXX ADD sys_buf_allocator_set() to the sys_services API
 extern void _mem_buf_allocator_set(void * buf, const char * caller_id);
 #define sys_buf_allocator_set(buf, caller_id) _mem_buf_allocator_set((buf), (caller_id))
 
-//XXXX This bogus hack reply works for the one place it gets called from
+//XXXX ADD sys_buf_cache_size() to the sys_services API
+//XXX This bogus hack reply works for the one place it gets called from
 #define sys_buf_cache_size(cache) ({ \
     expect_eq(strcmp(__func__, "lc_create"), 0, \
-		"check sys_buf_cache_size() macro usage in %s", __func__); \
+		"XXX XXX XXX check sys_buf_cache_size() macro usage in %s", __func__); \
     ((unsigned)(-1));   /*XXX "as big as you need" */ \
 })
 
@@ -350,13 +350,15 @@ _find_next_bit(const unsigned long *src, unsigned long nbits,
 
 #include <linux/kernel.h>   /* linux/kernel.h is the first kernel header file to #include */
 
+//XXXX Should use unlocked_stdio in place of fprintf() if aborting
+
 /* Override declarations of these in linux/kernel.h */
 #define vprintk(fmt, va_list)	vfprintf(stderr, fmt, va_list)
 //#define printk(fmt, args...)	fprintf(stderr, "[%d]" FL_STR "> " fmt, gettid(), ##args)
 #define printk(fmt, args...)	fprintf(stderr, fmt, ##args)
 
 #define nlprintk(fmtargs...)	_nlprintk(""fmtargs)
-#define _nlprintk(fmt, args...)	printk(fmt"\n", ##args)
+#define _nlprintk(fmt, args...)	printk(FL_STR ">" fmt"\n", ##args)
 
 #define printk_ratelimit(void)				0
 #define printk_timed_ratelimit(jiffies, interval_msec)	false
@@ -406,19 +408,49 @@ _bitmap_set_bit(unsigned long * dst, unsigned int bitno)
 #define scnprintf(buf, bufsize, fmtargs...) snprintf((buf), (bufsize), fmtargs)
 #define vscnprintf(buf, bufsize, fmt, va)   vsnprintf((buf), (bufsize), fmt, va)
 
+#define _kvasprintf(_retp, fmt, va)					    \
+({									    \
+    char * _str;							    \
+    int len = vasprintf(&_str, fmt, va);				    \
+    if (len < 0) {							    \
+	*(_retp) = NULL;						    \
+    } else {								    \
+	*(_retp) = strncpy(vmalloc(1 + len), _str, 1 + len);	    \
+	free(_str);							    \
+    }									    \
+    len;								    \
+})
+
 #define kvasprintf(gfp, fmt, va) \
 ({ \
     char * _ret; \
-    int const _rc = sys_vasprintf(&_ret, fmt, va); \
+    int const _rc = _kvasprintf(&_ret, fmt, va); \
     if (_rc < 0) \
 	_ret = NULL; \
     _ret; \
 })
 
+/* Return a newly-allocated freeable formatted string from the printf-like arguments */
+//XXX These should be non-inline varargs functions (instead of macros)
+
+/* Use asprintf(), then copy result into our tracked memory */
+#define _kasprintf(_retp, fmtargs...)					    \
+({									    \
+    char * _str;							    \
+    int len = asprintf(&_str, fmtargs);					    \
+    if (len < 0) {							    \
+	*(_retp) = NULL;						    \
+    } else {								    \
+	*(_retp) = strncpy(sys_mem_alloc(1 + len), _str, 1 + len);	    \
+	free(_str);							    \
+    }									    \
+    len;								    \
+})
+
 #define kasprintf(gfp, fmt, args...) \
 ({ \
     char * _ret; \
-    int const _rc = sys_asprintf(&_ret, fmt, ##args); \
+    int const _rc = _kasprintf(&_ret, fmt, ##args); \
     if (_rc < 0) \
 	_ret = NULL; \
     _ret; \
@@ -514,6 +546,8 @@ struct kernel_param {			/* unused */
 #else
 #define _MODNAME			KBUILD_MODNAME ": "
 #endif
+
+extern const char * UMC_fuse_mount_point;   /* path in real fs to fuse root */
 
 /* These could be decoupled from UMC_sys.h, but seem convenient here */
 #define SYS_ASSERT_H		//XXX inhibit inclusions in libtcmur

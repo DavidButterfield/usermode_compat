@@ -288,6 +288,8 @@ fuse_module_rmdir(struct module * owner)
 
 /******************************************************************************/
 
+const char * UMC_fuse_mount_point;
+
 static struct task_struct * UMC_FUSE_THREAD;
 
 /* Here starting up and running on the fuse thread */

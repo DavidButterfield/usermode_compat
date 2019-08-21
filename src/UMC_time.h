@@ -74,7 +74,7 @@ ns_to_timeval(unsigned long ns)
     _t_end; \
 })
 
-//XXX Check all these time comparisons wrt signed vs. unsigned, and overflow
+//XXXX Check all these time comparisons wrt signed vs. unsigned, and overflow
 #define time_after(x, y)		((long)((x) - (y)) > 0)
 #define time_after_eq(x, y)		((long)((x) - (y)) >= 0)
 #define time_before(x, y)		time_after((y), (x))

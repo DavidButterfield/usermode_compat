@@ -98,7 +98,7 @@ netlink_dump(struct sock *sk)
 
 	len = cb->dump(skb, cb);
 
-#if 0	//XXX how do repeat calls of netlink_dump() happen?
+#if 0	//XXX how do repeat calls of netlink_dump() happen in a real kernel?
 	// Someone is supposed to call this function repeatedly...
 	if (len > 0) {
 		mutex_unlock(nlk->cb_mutex);
@@ -185,7 +185,6 @@ netlink_dump_start(struct sock *ssk, struct sk_buff *skb,
 static void
 on_netlink_recv(struct sock * sk, int len)
 {
-    //XXX assert_eq(sk->netlink_rcv, genl_rcv);
     expect_eq(len, 0);
 
     struct sk_buff * skb = alloc_skb(NETLINK_BUFSIZE, IGNORED);
@@ -206,8 +205,8 @@ on_netlink_recv(struct sock * sk, int len)
 	}
 	pr_warning("error %ld on netlink fd=%d\n", rc, sk->fd);
 
-	struct socket * sock = container_of(sk, struct socket, sk_s);   /* annoying */
-	init_net.genl_sock = NULL;  //XXX
+	struct socket * sock = container_of(sk, struct socket, sk_s);
+	init_net.genl_sock = NULL;
 	sock_release(sock);
 
 	//XXXX Should re-establish netlink service socket

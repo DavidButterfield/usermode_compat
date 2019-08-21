@@ -16,7 +16,7 @@ unsigned int nr_cpu_ids;		/* number of CPUs at runtime */
 
 struct task_struct * UMC_irqthread;	/* delivers "softirq" callbacks */
 
-//XXXXX priv is unused
+//XXXXX send_sig(priv) is unused/unimplemented
 void
 _send_sig(unsigned long signo, struct task_struct * task,
 					    int priv, sstring_t caller_id)
@@ -132,7 +132,7 @@ _UMC_wait_locked(wait_queue_head_t * wq,
     spin_lock_assert_holding(lockp);
     if (innerlockp)
 	spin_lock_assert_holding(innerlockp);
-    // expect_a(t_end + sys_time_delta_of_ms(100), now);	//XXX
+
     expect_ne(current->state, TASK_RUNNING);
     if (unlikely(!wq->initialized))
 	_init_waitqueue_head(wq);
@@ -160,6 +160,7 @@ _UMC_wait_locked(wait_queue_head_t * wq,
     pthread_cond_timedwait(&wq->pcond, &(lockp)->lock, &ts_end);
 
     UMC_LOCK_CLAIM(lockp, FL_STR);	/* cond_wait reacquires LOCK */
+
     if (innerlockp)
 	spin_lock(innerlockp);
 
@@ -265,7 +266,7 @@ _kthread_stop(struct task_struct * task)
     task->should_stop = true;
 
     /* Wait for the thread to exit */
-    if (!wait_for_completion_timeout(&task->stopped, 2 * HZ)) {
+    if (!wait_for_completion_timeout(&task->stopped, 5 * HZ)) {
 	/* Too slow -- jab it */
 	pr_warning("kthread_stop of %s (%u) excessive wait -- attempting signal\n",
 		    task->comm, task->pid);
@@ -291,7 +292,7 @@ kthread_stop(struct task_struct * task)
     assert(!task->event_task);
 
     ret = _kthread_stop(task);
-    if (ret != -EBUSY) {	    //XXX
+    if (ret != -EBUSY) {
 	sys_thread_free(task->SYS);
 	UMC_current_free(task);
     }
@@ -509,7 +510,7 @@ UMC_alarm_handler(void * const v_timer, uint64_t const now, error_t const err)
 
 /******************************************************************************/
 
-#include <sys/resource.h>	// setpriority()    //XXX
+#include <sys/resource.h>
 
 error_t
 set_user_nice(struct task_struct * task, int niceness)
@@ -620,7 +621,7 @@ irqthread_stop(struct task_struct * task)
     sys_event_task_stop(event_task);
 
     ret = _kthread_stop(task);
-    if (ret != -EBUSY) {	    //XXX
+    if (ret != -EBUSY) {
 	sys_event_task_free(event_task);
 	sys_thread_free(task->SYS);
 	UMC_current_free(task);

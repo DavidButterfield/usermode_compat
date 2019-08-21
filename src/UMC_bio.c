@@ -20,7 +20,14 @@ DEFINE_SPINLOCK(UMC_pagelist_lock);
 uint8_t __aligned(PAGE_SIZE) empty_zero_page[PAGE_SIZE];
 struct page zero_page;
 
-const char * UMC_fuse_mount_point = "/UMCfuse";	//XXXXXX
+void
+file_inode_destructor(struct inode * inode)
+{
+    trace_file("CLOSE real file/bdev fd=%d", inode->UMC_fd);
+    assert_ge(inode->UMC_fd, 0);
+    close(inode->UMC_fd);
+    record_free(inode);
+}
 
 static void
 bdev_inode_destructor(struct inode * inode)
@@ -83,7 +90,6 @@ lookup_bdev(const char * path, bool exclusive)
 	//XXXXXX barf.  This has to allow the same "holder" to open multiply
 	if (bdev->is_open_exclusive) {
 	    pr_warning("bdev is already open exclusive, want=%d\n", exclusive);
-	    sys_breakpoint();
 	    bdev = ERR_PTR(-EBUSY);
 	} else if (exclusive && atomic_get(&bdev->bd_inode->i_count) > 1) {
 	    pr_warning("bdev exclusive wanted but already open count=%d\n",

@@ -11,7 +11,7 @@
 #include "UMC_sys.h"
 #include "UMC_lock.h"
 #include "fuse_tree.h"
-#include <sys/stat.h>	    // umode_t, off_t, dev_t	//XXX
+#include <sys/stat.h>
 
 struct inode {
     /* set by init_inode() */

@@ -10,11 +10,14 @@
 
 #ifndef UMC_LOCK_H
 #define UMC_LOCK_H
-#include <stddef.h>	// container_of, offsetof   //XXX
-#include <pthread.h>	//XXXXXX remove after fixing to use sys_mutex, not pthread_mutex
-#include <semaphore.h>	//XXX could move this to .c file
+#include <stddef.h>
+#include <pthread.h>
+#include <semaphore.h>
 
-#define trace_lock(args...)	//	nlprintk(args)
+#define trace_lock(args...)	    //	nlprintk(args)
+#define trace_sema(args...)	    //	nlprintk(args)
+#define trace_kref(args...)	    //	nlprintk(args)
+#define trace_rcu(args...)	    //	nlprintk(args)
 
 #define UMC_LOCK_CHECKS	    /* do lock checks in all builds */
 
@@ -97,7 +100,8 @@ atomic_add_unless(atomic_t * ptr, int increment, int unless_match)
     /* Avoid clogging CPU pipeline with lock fetches for several times around a spinloop */
     /* There seems to be some problem with valgrind long looping with this instruction XXX */
     #include <valgrind.h>
-    #define _SPINWAITING()   do { if (!RUNNING_ON_VALGRIND) __builtin_ia32_pause(); } while (0)
+    #define _SPINWAITING() \
+	do { if (!RUNNING_ON_VALGRIND) __builtin_ia32_pause(); else sched_yield(); } while (0)
 #else
   #define _SPINWAITING()		/* */
 #endif
@@ -320,8 +324,9 @@ _mutex_lock(struct mutex * lock, sstring_t whence)
 /* Returns 0 if mutex acquired; otherwise -EINTR on signal */
 #define mutex_lock_interruptible(lock)	_mutex_lock_interruptible((lock), FL_STR)
 
+#define mutex_unlock(lock) _mutex_unlock((lock), FL_STR)
 static inline void
-mutex_unlock(struct mutex * lock)
+_mutex_unlock(struct mutex * lock, sstring_t whence)
 {
     UMC_LOCK_DISCLAIM(lock, whence);
     pthread_mutex_unlock(&lock->lock);
@@ -392,7 +397,13 @@ static inline void
 _spin_unlock(spinlock_t * lock, sstring_t whence)
 {
     if (!atomic_add_unless(&lock->nest, -1, 0))
-	mutex_unlock(lock);
+	_mutex_unlock(lock, whence);
+#ifdef UMC_LOCK_CHECKS
+    else if (lock->owner == current) {
+	/* Here it isn't really "nested" -- orig holder drops first */
+	lock->owner = lock->nestor;
+    }
+#endif
 }
 
 /* Use of this function is inherently racy */
@@ -418,6 +429,10 @@ _spin_lock_nested(spinlock_t * lock, int subclass, sstring_t whence)
      */
     if (_mutex_tryspin(lock, whence) == 0)
 	atomic_dec(&lock->nest);
+#ifdef UMC_LOCK_CHECKS
+    else
+	lock->nestor = current;
+#endif
 }
 
 extern int _atomic_dec_and_lock(atomic_t * atomic, spinlock_t * lock);
@@ -479,8 +494,13 @@ struct rcu_head {
 };
 
 /* Readers */
-#define rcu_read_lock()			read_lock(&UMC_rcu_lock)
-#define rcu_read_unlock()		read_unlock(&UMC_rcu_lock)
+
+#define rcu_read_lock()	\
+    do { trace_rcu("RCU LOCK"); read_lock(&UMC_rcu_lock); } while (0)
+
+#define rcu_read_unlock() \
+    do { trace_rcu("RCU UNLOCK"); read_unlock(&UMC_rcu_lock); } while (0)
+
 #define _rcu_assert_readlocked()	rwlock_assert_readlocked(&UMC_rcu_lock)
 
 /* These are only supposed to be used under rcu_read_lock(), right? XXX */
@@ -535,8 +555,6 @@ extern struct task_struct	      * UMC_rcu_cb_thr;
 #define __rcu				/* neutralize some kernel compiler thing */
 
 /*** Sleepable semaphore ***/
-
-#define trace_sema(fmtargs...)	//	sys_trace(fmtargs)
 
 struct semaphore {
     sem_t				UM_sem;
@@ -593,14 +611,12 @@ struct kref {
     atomic_t refcount;
 };
 
-#define kref_trace(args...)    //	sys_trace(args)
-
 #define kref_init(kref)			_kref_init((kref), FL_STR)
 static inline void
 _kref_init(struct kref *kref, sstring_t caller_id)
 {
     atomic_set(&(kref)->refcount, 1);
-    kref_trace("%s: KREF_INIT %p", caller_id, (void *)kref);
+    trace_kref("%s: KREF_INIT %p", caller_id, (void *)kref);
 }
 
 #define kref_get(kref)			_kref_get((kref), FL_STR)
@@ -609,7 +625,7 @@ _kref_get(struct kref *kref, sstring_t caller_id)
 {
     int nrefs = atomic_inc_return(&(kref)->refcount);
     assert_ge(nrefs, 2);
-    kref_trace("%s: KREF_GET %p increases refs to %d", caller_id, (void *)kref, nrefs);
+    trace_kref("%s: KREF_GET %p increases refs to %d", caller_id, (void *)kref, nrefs);
 }
 
 #define kref_put(kref, destructor)	_kref_put((kref), (destructor), FL_STR)
@@ -620,11 +636,11 @@ _kref_put(struct kref *kref, void (*destructor)(struct kref *), sstring_t caller
     assert_gt(nrefs, 0);
 
     if (!atomic_dec_and_test(&(kref)->refcount)) {
-	kref_trace("%s: KREF_PUT %p leaves %d refs remaining", caller_id, (void *)kref, nrefs-1);
+	trace_kref("%s: KREF_PUT %p leaves %d refs remaining", caller_id, (void *)kref, nrefs-1);
 	return false;
     }
 
-    kref_trace("%s: KREF_PUT %p calls destructor", caller_id, (void *)kref);
+    trace_kref("%s: KREF_PUT %p calls destructor", caller_id, (void *)kref);
     destructor(kref);
     return true;
 }

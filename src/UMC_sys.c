@@ -106,7 +106,7 @@ simple_strtoul(const char * str, char ** endptr, unsigned int base)
     return strtoul(str, endptr, base);
 }
 
-//XXX strict_strtoul() should be more strict
+//XXX strict_strtoul() is not as strict as it ought to be
 
 error_t
 strict_strtoul(const char * str, unsigned int base, unsigned long * var)
@@ -153,19 +153,20 @@ strict_strtoll(const char * str, unsigned int base, long long * var)
 }
 
 /******************************************************************************/
+/* Not used with the tcmur storage backends, but we still need the symbols */
 
-#if 0
-extern __thread char sys_pthread_name[16];  //XXX
+#ifdef ENABLE_AIO
+extern __thread char sys_pthread_name[16];
 #endif
 
 /* Callback when an AIO thread is created to set up a "current" pointer for it --
  * the AIO thread calls back into "kernel" code which expects this
  */
-extern void aios_thread_init(void * unused);	//XXX
+extern void aios_thread_init(void * unused);
 void
 aios_thread_init(void * unused)
 {
-#if 0
+#ifdef ENABLE_AIO
     expect_eq(unused, NULL);
     UMC_current_set(
 	    UMC_current_init(
@@ -182,11 +183,11 @@ aios_thread_init(void * unused)
 #endif
 }
 
-extern void aios_thread_exit(void * unused);	//XXX
+extern void aios_thread_exit(void * unused);
 void
 aios_thread_exit(void * unused)
 {
-#if 0
+#ifdef ENABLE_AIO
     expect_eq(unused, NULL);
     assert(current);
     UMC_current_free(current);

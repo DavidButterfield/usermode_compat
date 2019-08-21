@@ -289,7 +289,7 @@ bio_tcmur_remove(int minor)
     if (!bdev)
 	return -ENOENT;
 
-    //XXXXX Need to check refcount first or use iput or something
+    //XXXXX bio_tcmur_remove() needs to check refcount or use iput or something
 
     bdev_complex_free(bdev);
     the_bio_tcmur_bdevs[minor] = NULL;
@@ -316,7 +316,7 @@ bio_tcmur_init(int major, int max_minor)
     if (!op_cache)
 	return -ENOMEM;
 
-    the_bio_tcmur_bdevs = sys_mem_zalloc(max_minor * sizeof(*the_bio_tcmur_bdevs));
+    the_bio_tcmur_bdevs = vzalloc(max_minor * sizeof(*the_bio_tcmur_bdevs));
     if (!the_bio_tcmur_bdevs) {
 	kmem_cache_destroy(op_cache);
 	op_cache = NULL;
@@ -344,7 +344,7 @@ bio_tcmur_exit(void)
 
     bio_enabled = false;
 
-    sys_mem_free(the_bio_tcmur_bdevs);
+    vfree(the_bio_tcmur_bdevs);
     the_bio_tcmur_bdevs = NULL;
     n_bio_tcmur_bdevs = 0;
 

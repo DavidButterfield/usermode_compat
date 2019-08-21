@@ -112,7 +112,7 @@ _alloc_pages(gfp_t gfp, unsigned int order, sstring_t caller_id)
 #define page_cache_sync_readahead(map, ra, filp, index, x)	DO_NOTHING()
 #define mapping_writably_mapped(map)	false	/* no address aliasing */
 
-#define flush_dcache_page(page)		DO_NOTHING()		//XXXXX ?
+#define flush_dcache_page(page)		DO_NOTHING()		//XXXXX OK?
 
 #define alloc_page(gfp)			alloc_pages(gfp, 0)
 #define clear_page(addr)		memset((addr), 0, PAGE_SIZE)
