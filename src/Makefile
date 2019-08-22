@@ -8,6 +8,10 @@
 #   MY_CFLAGS
 #   EXTRA_CFLAGS
 
+export CFLAGS
+export MY_CFLAGS
+export EXTRA_CFLAGS
+
 ##MY_CFLAGS += -DDEBUG
 # MY_CFLAGS += -fsanitize=undefined
 # MY_CFLAGS += -DNDEBUG
