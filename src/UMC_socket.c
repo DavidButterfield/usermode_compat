@@ -437,7 +437,7 @@ __alloc_skb(unsigned int size, gfp_t gfp_mask, int fclone, int node)
 	struct sk_buff *skb;
 	u8 *data;
 
-	assert_eq(fclone, 0);
+	assert_eq(fclone, 0);	//__alloc_skb(fclone) not implemented
 
 	skb = record_alloc(skb);
 

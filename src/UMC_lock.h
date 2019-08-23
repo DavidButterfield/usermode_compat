@@ -99,7 +99,7 @@ atomic_add_unless(atomic_t * ptr, int increment, int unless_match)
 #if defined(__i386__) || defined(__x86_64__)
     /* Avoid clogging CPU pipeline with lock fetches for several times around a spinloop */
     /* There seems to be some problem with valgrind long looping with this instruction XXX */
-    #include <valgrind.h>
+    #include <valgrind/valgrind.h>
     #define _SPINWAITING() \
 	do { if (!RUNNING_ON_VALGRIND) __builtin_ia32_pause(); else sched_yield(); } while (0)
 #else

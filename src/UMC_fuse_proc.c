@@ -336,7 +336,7 @@ fuse_thread_stop(void)
 
     trace_fuse_thread("tkill %d, SIGTERM", fusethread->pid);
     int rc = tkill(fusethread->pid, SIGTERM);
-    expect_eq(rc, 0, "tkill fuse tid=%u errno=%d '%s'",
+    expect_noerr(rc, "tkill fuse tid=%u errno=%d '%s'",
 		     fusethread->pid, errno, strerror(errno));
 
     /* Wait a second for fuse thread to return to UMC_fuse_run */
@@ -438,7 +438,7 @@ seq_fmt(struct seq_file * seq)
 
     while (list_item) {
 	error_t rc = seq->op->show(seq, list_item);
-	expect_eq(rc, 0);
+	expect_noerr(rc, "seq->op->show() returned error=%d", rc);
 	list_item = seq->op->next(seq, list_item, &pos);
     }
 

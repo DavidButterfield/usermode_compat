@@ -59,6 +59,10 @@
 #define gettid()			((pid_t)(syscall(SYS_gettid)))
 #endif
 
+#ifndef tkill
+#define tkill(tid, sig)			(int)(syscall(__NR_tkill, tid, sig))
+#endif
+
 /********** Compiler tricks **********/
 
 /* Make a string out of a token */
@@ -130,41 +134,7 @@ typedef unsigned int			fmode_t;
 #define ____cacheline_aligned		__attribute__((aligned(__CACHE_LINE_BYTES)))
 #define ____cacheline_aligned_in_smp	__attribute__((aligned(SMP_CACHE_BYTES)))
 
-/* Return a newly-allocated freeable formatted string from the printf-like arguments */
-//XXX These should be non-inline varargs functions (instead of macros)
-
-/* Use asprintf(), then copy result into our tracked memory */
-#define sys_asprintf(_retp, fmtargs...)					    \
-({									    \
-    char * _str;							    \
-    int len = asprintf(&_str, fmtargs);					    \
-    if (len < 0) {							    \
-	*(_retp) = NULL;						    \
-    } else {								    \
-	*(_retp) = strncpy(sys_mem_alloc(1 + len), _str, 1 + len);	    \
-	free(_str);							    \
-    }									    \
-    len;								    \
-})
-
-#define sys_vasprintf(_retp, fmt, va)					    \
-({									    \
-    char * _str;							    \
-    int len = vasprintf(&_str, fmt, va);				    \
-    if (len < 0) {							    \
-	*(_retp) = NULL;						    \
-    } else {								    \
-	*(_retp) = strncpy(vmalloc(1 + len), _str, 1 + len);	    \
-	free(_str);							    \
-    }									    \
-    len;								    \
-})
-
 /******************************************************************************/
-
-//XXXX ADD sys_buf_allocator_set() to the sys_services API
-extern void _mem_buf_allocator_set(void * buf, const char * caller_id);
-#define sys_buf_allocator_set(buf, caller_id) _mem_buf_allocator_set((buf), (caller_id))
 
 //XXXX ADD sys_buf_cache_size() to the sys_services API
 //XXX This bogus hack reply works for the one place it gets called from
@@ -411,14 +381,14 @@ _bitmap_set_bit(unsigned long * dst, unsigned int bitno)
 #define _kvasprintf(_retp, fmt, va)					    \
 ({									    \
     char * _str;							    \
-    int len = vasprintf(&_str, fmt, va);				    \
-    if (len < 0) {							    \
+    int _len = vasprintf(&_str, fmt, va);				    \
+    if (_len < 0) {							    \
 	*(_retp) = NULL;						    \
     } else {								    \
-	*(_retp) = strncpy(vmalloc(1 + len), _str, 1 + len);	    \
+	*(_retp) = strncpy(vmalloc(1 + _len), _str, 1 + _len);	    \
 	free(_str);							    \
     }									    \
-    len;								    \
+    _len;								    \
 })
 
 #define kvasprintf(gfp, fmt, va) \
@@ -437,14 +407,14 @@ _bitmap_set_bit(unsigned long * dst, unsigned int bitno)
 #define _kasprintf(_retp, fmtargs...)					    \
 ({									    \
     char * _str;							    \
-    int len = asprintf(&_str, fmtargs);					    \
-    if (len < 0) {							    \
+    int _len = asprintf(&_str, fmtargs);					    \
+    if (_len < 0) {							    \
 	*(_retp) = NULL;						    \
     } else {								    \
-	*(_retp) = strncpy(sys_mem_alloc(1 + len), _str, 1 + len);	    \
+	*(_retp) = strncpy(vmalloc(1 + _len), _str, 1 + _len);	    \
 	free(_str);							    \
     }									    \
-    len;								    \
+    _len;								    \
 })
 
 #define kasprintf(gfp, fmt, args...) \
@@ -477,6 +447,8 @@ get_random_bytes(void * addr, int len)
 extern char * UMC_string_concat_free(char * prefix, char * suffix);
 
 extern char * strnchr(const char * str, size_t strmax, int match);
+
+#define UMC_system(cmd) system(cmd)
 
 /* Call (another) usermode program */
 extern int call_usermodehelper(const char * progpath,
@@ -547,11 +519,14 @@ struct kernel_param {			/* unused */
 #define _MODNAME			KBUILD_MODNAME ": "
 #endif
 
+#ifndef PATH_MAX
+#define PATH_MAX 4096
+#endif
+
 extern const char * UMC_fuse_mount_point;   /* path in real fs to fuse root */
 
 /* These could be decoupled from UMC_sys.h, but seem convenient here */
-#define SYS_ASSERT_H		//XXX inhibit inclusions in libtcmur
-#include "UMC_assert.h"
+#include "sys_assert.h"
 #include "UMC_time.h"
 #include "UMC_mem.h"
 

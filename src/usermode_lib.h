@@ -38,7 +38,7 @@
     // #include "UMC_kernel.h"
     // #include <linux/list.h>
     // #include <linux/bitmap.h>
-    // #include "UMC_assert.h"
+    // #include "sys_assert.h"
     // #include "UMC_time.h"
 	// #include <linux/ktime.h>
     // #include "UMC_mem.h"
@@ -100,7 +100,10 @@
 void __exit idr_exit_cache(void);
 #include <linux/idr.h>
 
-#ifdef INCLUDE_EXTRAS
+#ifndef INCLUDE_EXTRAS
+#define INCLUDE_EXTRAS 1
+#endif
+#if INCLUDE_EXTRAS
 /* UMC doesn't depend on these, and apps that use them already include them.
  * They are here mainly to ensure they continue to compile successfully.
  */

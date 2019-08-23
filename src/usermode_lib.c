@@ -55,11 +55,11 @@ UMC_init(const char * mountpoint)
 	int tcmur_max_minor = 256;		//XXXX
 
 	err = libtcmur_init(NULL);		/* default handler_prefix */
-	verify_eq(err, 0, "libtcmur_init");
+	verify_noerr(err, "libtcmur_init");
 
 	UMC_fuse_mount_point = mountpoint;
 	err = fuse_tree_init(mountpoint);
-	verify_eq(err, 0, "fuse_tree_init");
+	verify_noerr(err, "fuse_tree_init");
 
 	fuse_tree_mkdir("proc", NULL);
 	fuse_tree_mkdir("dev", NULL);
@@ -68,13 +68,13 @@ UMC_init(const char * mountpoint)
 
 	/* bio_tcmur_init() after /dev established */
 	err = bio_tcmur_init(tcmur_major, tcmur_max_minor);
-	verify_eq(err, 0, "bio_tcmur_init");
+	verify_noerr(err, "bio_tcmur_init");
 
 	err = fuse_bio_init();
-	verify_eq(err, 0, "fuse_bio_init");
+	verify_noerr(err, "fuse_bio_init");
 
 	err = fuse_thread_start();
-	verify_eq(err, 0, "fuse_thread_start");
+	verify_noerr(err, "fuse_thread_start");
     }
 
     /* Start the RCU callback thread */
@@ -114,15 +114,15 @@ UMC_exit(void)
 	if (err == -EINVAL)
 	    { /* fuse thread already gone -- ignore the EINVAL */ }
 	else {
-	    expect_eq(err, 0, "fuse_thread_stop");
+	    expect_noerr(err, "fuse_thread_stop");
 	}
 
 	if (!err) {
 	    err = fuse_bio_exit();
-	    expect_eq(err, 0, "fuse_bio_exit");
+	    expect_noerr(err, "fuse_bio_exit");
 
 	    err = bio_tcmur_exit();
-	    expect_eq(err, 0, "bio_tcmur_exit");
+	    expect_noerr(err, "bio_tcmur_exit");
 
 	    fuse_tree_rmdir("proc", NULL);
 	    fuse_tree_rmdir("dev", NULL);
@@ -131,10 +131,10 @@ UMC_exit(void)
 	    fuse_tree_rmdir("sys", NULL);
 
 	    err = fuse_tree_exit();
-	    expect_eq(err, 0, "fuse_tree_exit");
+	    expect_noerr(err, "fuse_tree_exit");
 
 	    err = libtcmur_exit();
-	    expect_eq(err, 0, "libtcmur_exit");
+	    expect_noerr(err, "libtcmur_exit");
 	}
     }
 

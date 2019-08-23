@@ -15,7 +15,7 @@ __thread size_t UMC_size_t_JUNK = 0;	/* for avoiding unused-value gcc warnings *
 void
 dump_stack(void)
 {
-    sys_backtrace("kernel-code call to dump_stack()");
+    sys_backtrace("call to dump_stack()");
 }
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27)
@@ -62,7 +62,7 @@ si_meminfo(struct sysinfo *si)
 {
     struct sysinfo si_space;
     int rc = sysinfo(&si_space);
-    expect_eq(rc, 0);
+    expect_noerr(rc, "sysinfo");
     /* Kernel code appears to assume the unit is PAGE_SIZE */
     unsigned int unit = si_space.mem_unit;
     si->totalram = si_space.totalram * unit / PAGE_SIZE;

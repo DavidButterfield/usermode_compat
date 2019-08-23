@@ -36,6 +36,10 @@ ifndef MY_SRC
 MY_SRC = $(CURDIR)/../..
 endif
 
+ifndef USERMODE_LIB_SRC
+export USERMODE_LIB_SRC = $(MY_SRC)/usermode_compat/src
+endif
+
 ifndef REF_KERNEL
 ### Place to get real kernel source files of the level being emulated
 REF_KERNEL := $(MY_SRC)/linux-2.6.32.27
@@ -125,9 +129,11 @@ SRCS_D += UMC_bio_tcmur.c
 
 OBJS_D = $(SRCS_D:.c=.o)
 
-MY_CFLAGS += -g -ggdb -fno-omit-frame-pointer -fPIC -I. -isystem ./arch/x86/include -isystem include
+MY_CFLAGS += -g -ggdb -fno-omit-frame-pointer -fPIC
+MY_CFLAGS += -I. -isystem $(USERMODE_LIB_SRC)/arch/x86/include -isystem $(USERMODE_LIB_SRC)/include
 
 MY_CFLAGS += -I$(TCMUR_SRC) -I$(TCMUR_SRC)/ccan -I$(LIBTCMUR)
+MY_CFLAGS += -DUSE_UMC
 
 all:	check_kcopy check_MTE
 	$(MAKE) cscope

@@ -492,7 +492,7 @@ UMC_tasklet_thr(void * v_tasklet)
 void
 UMC_alarm_handler(void * const v_timer, uint64_t const now, error_t const err)
 {
-    assert_eq(err, 0);
+    expect_noerr(err, "UMC_alarm_handler got err=%d", err);
     if (unlikely(err))
 	return;
 
