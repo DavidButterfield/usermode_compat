@@ -12,7 +12,6 @@
  */
 #ifndef USERMODE_LIB_H
 #define USERMODE_LIB_H
-#define _GNU_SOURCE
 
 #ifndef __x86_64__
 #warning usermode_lib has been compiled on 64-bit x86 only -- work required
@@ -54,6 +53,11 @@
 	// #include <semaphore.h>
 	// #include <valgrind.h>
 
+#include "UMC_fuse_proc.h"	/* /proc simulated using fuse */
+    // #include "UMC_sys.h"
+    // #include "UMC_file.h"
+    // #include "fuse_tree.h"
+
 #include "UMC_bio.h"		/* add block devices and bio */
     // #include "UMC_sys.h"
     // #include "UMC_thread.h"
@@ -74,6 +78,8 @@
     // #include "UMC_bio.h"
     // #include <fcntl.h>
 
+#ifndef NO_UMC_SOCKETS
+
 #include "UMC_socket.h"		/* interface to real sockets */
     // #include "UMC_sys.h"
     // #include "UMC_file.h"
@@ -89,16 +95,13 @@
     // #include <linux/netlink.h>
     // #include <net/genetlink.h>
 
-#include "UMC_fuse_proc.h"	/* /proc simulated using fuse */
-    // #include "UMC_sys.h"
-    // #include "UMC_file.h"
-    // #include "fuse_tree.h"
+#endif
 
 #include "UMC_stubs.h"	/* referenced by apps but not implemented by UMC */
 
 /* This is an "extra", but it gets initialized from UMC_init() */
 void __exit idr_exit_cache(void);
-#include <linux/idr.h>
+#include "include/linux/idr.h"
 
 #ifndef INCLUDE_EXTRAS
 #define INCLUDE_EXTRAS 1
@@ -107,9 +110,9 @@ void __exit idr_exit_cache(void);
 /* UMC doesn't depend on these, and apps that use them already include them.
  * They are here mainly to ensure they continue to compile successfully.
  */
-#include <linux/rbtree.h>
-#include <linux/ioctl.h>
-#include <linux/swab.h>
+#include "include/linux/rbtree.h"
+#include "include/linux/ioctl.h"
+#include "include/linux/swab.h"
 #endif
 
 extern error_t UMC_init(const char *);

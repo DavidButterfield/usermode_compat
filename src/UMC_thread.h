@@ -44,7 +44,6 @@ struct completion {
 };
 
 #define TASK_COMM_LEN			16
-#define _GNU_SOURCE
 #include <errno.h>
 
 /* A kthread is implemented on top of a sys_thread --

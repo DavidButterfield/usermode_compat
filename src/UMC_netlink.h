@@ -26,7 +26,7 @@ extern void UMC_genl_init(void);
 extern void genl_rcv(struct sk_buff *skb);
 
 struct notifier_block;
-#include <linux/netlink.h>
+#include "include/linux/netlink.h"
 
 #define UMC_NETLINK_PORT 1234u	/* UDP port for simulated netlink */
 
@@ -63,6 +63,6 @@ extern struct net init_net;
 #define GENL_ADMIN_PERM			0x01
 #define SLAB_PANIC			0x00040000UL
 struct genl_family;
-#include <net/genetlink.h>
+#include "include/net/genetlink.h"
 
 #endif /* UMC_NETLINK_H */

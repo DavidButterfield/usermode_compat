@@ -121,7 +121,7 @@
 #define kmem_cache_alloc(cache, gfp)	(((gfp) & __GFP_ZERO) ? (void *)sys_buf_zalloc(cache) \
 							      : (void *)sys_buf_alloc(cache))
 #define kmem_cache_zalloc(cache, gfp)	(_USE(gfp), (void *)sys_buf_zalloc(cache))
-#define kmem_cache_free(cache, ptr)	(_USE(cache), sys_buf_drop((sys_buf_t)(ptr)))
+#define kmem_cache_free(cache, ptr)	(_USE(cache), sys_buf_free((sys_buf_t)(ptr)))
 
 #define kmem_cache_size(cache)		sys_buf_cache_size(cache)
 

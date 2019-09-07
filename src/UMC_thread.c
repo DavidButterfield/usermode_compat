@@ -6,7 +6,7 @@
 #include "UMC_thread.h"
 #include "UMC_lock.h"
 
-#define trace_kthread(fmtargs...)   //	nlprintk(fmtargs)
+#define trace_kthread(fmtargs...)   	nlprintk(fmtargs)
 #define trace_sig(fmtargs...)		nlprintk(fmtargs)
 
 __thread struct task_struct * current;   /* current task (thread) structure */
@@ -219,8 +219,18 @@ UMC_kthread_fn(void * v_task)
     /* completed by wake_up_process() */
     wait_for_completion(&task->start_release);
 
-    //XXXX set cpu affinity ?
-    //XXXX set nice ?
+    long nr_cores = sysconf(_SC_NPROCESSORS_CONF);
+    cpu_set_t full_cpuset;
+    CPU_ZERO(&full_cpuset);
+
+    int i;
+    for (i = 0; i < nr_cores; i++)
+	CPU_SET(i, &full_cpuset);
+
+    error_t err = pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &full_cpuset);
+    if (err != 0)
+	pr_warning("pthread_setaffinity_np(tid=%d, mask=0x%lx) failed err=%d\n",
+			gettid(), *(long *)(&full_cpuset), err);
 
 				      /*** Run the kthread logic ***/
     error_t ret = task->exit_code = task->run_fn(task->run_env);
@@ -315,9 +325,9 @@ _kthread_create(error_t (*fn)(void * env), void * env, char * name, sstring_t ca
     UMC_current_init(task, thread, fn, env, name);
     kfree(name);
 
-    task->SYS->cpu_mask = current->SYS->cpu_mask;
-    task->SYS->nice = nice(0);
-    task->cpus_allowed = current->cpus_allowed;
+    // task->SYS->cpu_mask = current->SYS->cpu_mask;
+    // task->SYS->nice = nice(0);
+    // task->cpus_allowed = current->cpus_allowed;
 
     trace_kthread("task %s (%p, %u) creates kthread/task %s (%p)\n",
 	     current->comm, current, current->pid, task->comm, task);
@@ -603,7 +613,7 @@ _irqthread_run(struct sys_event_task_cfg * cfg, char * name, sstring_t caller_id
     struct sys_event_task * event_task = sys_event_task_alloc(cfg);
     task = _kthread_create(event_task_run, event_task, name, caller_id);
     task->event_task = event_task;
-    set_user_nice(task, nice(0) - 10);
+    set_user_nice(task, -10);
     kthread_start(task);
     return task;
 }

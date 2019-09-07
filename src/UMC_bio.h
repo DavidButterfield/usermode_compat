@@ -12,6 +12,7 @@
 #include "UMC_thread.h"
 #include "UMC_inode.h"
 #include "UMC_page.h"
+#include "fuse_tree.h"
 
 #define trace_err(args...)		nlprintk(args)
 

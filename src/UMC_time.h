@@ -34,7 +34,7 @@ ns_to_timeval(unsigned long ns)
 #define NSEC_PER_MSEC			1000000L
 #define NSEC_PER_SEC			1000000000L
 #define USEC_PER_SEC			1000000L
-#include <linux/ktime.h>
+#include "include/linux/ktime.h"
 
 #define ktime(t)			((ktime_t){ .tv64 = (t) })
 #define ktime_get()			ktime(sys_time_now() / (sys_time_hz()/1000000000L))

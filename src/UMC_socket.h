@@ -19,10 +19,10 @@ enum sock_type;
 struct poll_table_struct { };
 struct ts_config;
 struct ts_state;
-#include <net/checksum.h>
-#include <linux/skbuff.h>
-#include <linux/in.h>
-#include <linux/in6.h>
+#include "include/net/checksum.h"
+#include "include/linux/skbuff.h"
+#include "include/linux/in.h"
+#include "include/linux/in6.h"
 /* do not include <linux/socket.h> */
 
 struct sk_prot {

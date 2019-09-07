@@ -15,9 +15,9 @@
 #include <stdbool.h>
 #include <errno.h>
 
+#include "fuse_tree.h"
 #include "UMC_file.h"
 #include "UMC_fuse_proc.h"
-#include "fuse_tree.h"
 
 #define trace_cb(args...)		nlprintk(args)
 #define trace_fuse_thread(args...)	nlprintk(args)

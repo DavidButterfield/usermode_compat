@@ -7,10 +7,10 @@
  * later), or the Apache License 2.0.
  */
 #define _GNU_SOURCE
+#include "fuse_tree.h"
 #include "UMC_bio.h"
 #include "UMC_file.h"
 #include "UMC_fuse_proc.h"
-#include "fuse_tree.h"
 
 #define trace_bdev(fmtargs...)		nlprintk(fmtargs)
 

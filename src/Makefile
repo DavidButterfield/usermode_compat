@@ -12,7 +12,7 @@ export CFLAGS
 export MY_CFLAGS
 export EXTRA_CFLAGS
 
-##MY_CFLAGS += -DDEBUG
+MY_CFLAGS += -DDEBUG
 # MY_CFLAGS += -fsanitize=undefined
 # MY_CFLAGS += -DNDEBUG
 
@@ -54,7 +54,7 @@ ifndef TCMUR_SRC
 TCMUR_SRC = $(MY_SRC)/tcmu-runner
 endif
 
-MY_CFLAGS += -I$(SYS_SERVICE_INCL)
+MY_CFLAGS += -isystem $(SYS_SERVICE_INCL)
 MTELIB_H := $(SYS_SERVICE_INCL)/mtelib.h
 
 #######################  Enable most compiler warnings  #######################
@@ -79,7 +79,7 @@ WFLAGS_WARN += -Wunsafe-loop-optimizations
 
 WFLAGS_WARN += -Winit-self
 WFLAGS_WARN += -Wswitch-enum
-WFLAGS_WARN += -Wredundant-decls
+#XXX WFLAGS_WARN += -Wredundant-decls
 WFLAGS_WARN += -Wformat=2
 
 # This only warns if -fstrict-aliasing is enabled (e.g. by -O2), in which case the warning is important
@@ -97,7 +97,7 @@ WFLAGS_WARN += -Wstrict-aliasing
 # WFLAGS_WARN += -Wswitch-default			# 1 in lib/bitmap.c
 # WFLAGS_WARN += -Wcast-qual				# several in reference kernel files
 WFLAGS_WARN += -Wbad-function-cast			# 1 in linux/kernel.h when compiling SCST/DRBD
-WFLAGS_WARN += -Wshadow					# kernel.h, bitops.h when compiling SCST/DRBD
+#XXX WFLAGS_WARN += -Wshadow					# kernel.h, bitops.h when compiling SCST/DRBD
 WFLAGS_INHIBIT += -Wno-sign-compare			# 3 in net/netlink.h, 1 in linux/skbuff.h
 WFLAGS_INHIBIT += -Wno-implicit-fallthrough		# 1 in lib/nlattr.c
 
@@ -137,7 +137,8 @@ MY_CFLAGS += -DUSE_UMC
 
 all:	check_kcopy check_MTE
 	$(MAKE) cscope
-	$(MAKE) -C $(LIBTCMUR) CONFIG_BIO=1 libfusetree.a libtcmur.a
+	$(MAKE) -C $(LIBTCMUR) clean
+	$(MAKE) -C $(LIBTCMUR) USE_BIO=1 CONFIG_WORKQ=1 libfusetree.a libtcmur.a
 	$(MAKE) usermode_lib.a
 
 usermode_lib.a: .depend $(OBJS_D) $(OBJS_LIBTCMUR)

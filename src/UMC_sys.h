@@ -25,7 +25,10 @@
  */
 #ifndef UMC_SYS_H
 #define UMC_SYS_H
+
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 
 #define TRACE_syscall_err		defined
 
@@ -145,7 +148,7 @@ typedef unsigned int			fmode_t;
 })
 
 /******************************************************************************/
-#include <sys_service.h>    /* system services: event threads, polling, memory, time, etc */
+#include "sys_service.h"    /* system services: event threads, polling, memory, time, etc */
 extern void sys_breakpoint(void);
 
 #include <byteswap.h>
@@ -267,7 +270,7 @@ extern __thread size_t UMC_size_t_JUNK; /* avoid unused-value gcc warnings */
 #define UMC_kernelize64(callret...) \
 ({ ssize_t uk64_ret = _UMC_kernelize64(callret); \
     if (uk64_ret < 0 && uk64_ret != -EAGAIN) \
-	pr_warning("%s returned %d\n", #callret, uk64_ret); \
+	pr_warning("%s returned %ld\n", #callret, uk64_ret); \
     uk64_ret; \
 })
 
@@ -318,7 +321,7 @@ _find_next_bit(const unsigned long *src, unsigned long nbits,
 /* Override the __WARN() in bug.h included from linux/kernel.h */
 #define __WARN()    printk(KERN_WARNING "at %s\n", FL_STR);
 
-#include <linux/kernel.h>   /* linux/kernel.h is the first kernel header file to #include */
+#include "include/linux/kernel.h"   /* linux/kernel.h is the first kernel header file to #include */
 
 //XXXX Should use unlocked_stdio in place of fprintf() if aborting
 
@@ -335,7 +338,7 @@ _find_next_bit(const unsigned long *src, unsigned long nbits,
 
 #include "UMC_kernel.h"	    /* include first after linux/kernel.h */
 
-#include <linux/list.h>	    /* used all over the place */
+#include "include/linux/list.h"	    /* used all over the place */
 
 /*** Unaligned access ***/
 #define _DIRTY	__attribute__((__no_sanitize_undefined__))
@@ -368,7 +371,7 @@ _bitmap_set_bit(unsigned long * dst, unsigned int bitno)
     dst[idx] |= bitmask;
 }
 
-#include <linux/bitmap.h>
+#include "include/linux/bitmap.h"
 
 #define set_bit(bitno, ptr)		test_and_set_bit((bitno), (ptr))
 #define clear_bit(bitno, ptr)		test_and_clear_bit((bitno), (ptr))

@@ -14,10 +14,10 @@
 #include <stdbool.h>
 #include <errno.h>
 
+#include "fuse_tree.h"
 #include "UMC_bio.h"
 #include "UMC_file.h"
 #include "UMC_thread.h"
-#include "fuse_tree.h"
 #include "fuse_tcmur.h"
 
 #define trace_bio(args...)		//	nlprintk(args)

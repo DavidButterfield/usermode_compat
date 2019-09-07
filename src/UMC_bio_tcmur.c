@@ -15,8 +15,8 @@
 #include <errno.h>
 #include <limits.h>
 
-#include "UMC_bio.h"
 #include "fuse_tree.h"
+#include "UMC_bio.h"
 #include "libtcmur.h"
 
 static int bio_tcmur_major;
@@ -37,12 +37,12 @@ bio_tcmur_bdev(int minor)
 
 #define MAX_FAST_IOV 16
 struct bio_tcmur_op {
-	struct tcmur_cmd cmd;
+	struct libtcmur_task tcmur_task;
 	struct bio * bio;
 	struct iovec iov_space[MAX_FAST_IOV];
 };
 
-#define op_of_cmd(cmd)	container_of((cmd), struct bio_tcmur_op, cmd)
+#define op_of_cmd(cmd)	container_of((cmd), struct bio_tcmur_op, tcmur_task.tcmur_cmd)
 
 /* Complete the bio to our client */
 static inline void
@@ -137,13 +137,13 @@ make_request(struct request_queue *rq_unused, struct bio * bio)
 
     op->bio = bio;
 
-    cmd = &op->cmd;
+    cmd = &op->tcmur_task.tcmur_cmd;
     cmd->done = io_done_sts;
 
     if (is_sync) {
 	if (!bio_empty_barrier(bio))
 	    cmd->done = io_continue;
-	err = tcmur_flush(minor, cmd);
+	err = tcmur_flush(minor, &op->tcmur_task);
 	if (err)
 	    io_done_err(bio, err);
 	return err;
@@ -195,9 +195,9 @@ make_request(struct request_queue *rq_unused, struct bio * bio)
 
     /* Submit the command to the handler */
     if (is_write) {
-	err = tcmur_write(minor, cmd, cmd->iovec, cmd->iov_cnt, cmdlen, seekpos);
+	err = tcmur_write(minor, &op->tcmur_task, cmd->iovec, cmd->iov_cnt, cmdlen, seekpos);
     } else {
-	err = tcmur_read(minor, cmd, cmd->iovec, cmd->iov_cnt, cmdlen, seekpos);
+	err = tcmur_read(minor, &op->tcmur_task, cmd->iovec, cmd->iov_cnt, cmdlen, seekpos);
     }
 
     if (!err)
@@ -244,6 +244,9 @@ bio_tcmur_add(int minor)
 
     if (bdev_of_minor(minor))
 	return -EBUSY;
+
+    if (!tcmur_get_dev_name(minor))
+	return -ENOENT;	/* no tcmur device registered at this minor */
 
     size = tcmur_get_size(minor);
     block_size = tcmur_get_block_size(minor);
@@ -306,6 +309,8 @@ bio_tcmur_init(int major, int max_minor)
     assert_gt(max_minor, 0);
     assert_eq(the_bio_tcmur_bdevs, NULL);
     assert_eq(n_bio_tcmur_bdevs, 0);
+
+    pr_notice("bio_tcmur_init() tcmur_major=%d max_minor=%d\n", major, max_minor);
 
     op_cache = kmem_cache_create(
 			"the_bio_tcmur_op_cache",

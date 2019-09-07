@@ -10,7 +10,6 @@
 #define UMC_INODE_H
 #include "UMC_sys.h"
 #include "UMC_lock.h"
-#include "fuse_tree.h"
 #include <sys/stat.h>
 
 struct inode {

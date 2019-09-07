@@ -138,7 +138,9 @@ struct __kernel_sockaddr_storage {
         char            __data[_K_SS_MAXSIZE - sizeof(unsigned short)];
 } __attribute__ ((aligned(_K_SS_ALIGNSIZE)));
 
+#ifndef NO_UMC_SOCKETS
 #define sockaddr_storage	__kernel_sockaddr_storage
+#endif
 
 /*** linux/tcp.h ***/
 

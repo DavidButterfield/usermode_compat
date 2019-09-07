@@ -9,8 +9,8 @@
 #ifndef UMC_FUSE_PROC_H
 #define UMC_FUSE_PROC_H
 #include "UMC_sys.h"
-#include "UMC_file.h"
 #include "fuse_tree.h"
+#include "UMC_file.h"
 
 /* Start/control the FUSE thread */
 extern error_t fuse_thread_start(void);
