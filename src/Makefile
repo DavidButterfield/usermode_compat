@@ -138,7 +138,7 @@ MY_CFLAGS += -DUSE_UMC
 all:	check_kcopy check_MTE
 	$(MAKE) cscope
 	$(MAKE) -C $(LIBTCMUR) clean
-	$(MAKE) -C $(LIBTCMUR) USE_BIO=1 CONFIG_WORKQ=1 libfusetree.a libtcmur.a
+	$(MAKE) -C $(LIBTCMUR) USE_UMC=1 libfusetree.a libtcmur.a
 	$(MAKE) usermode_lib.a
 
 usermode_lib.a: .depend $(OBJS_D) $(OBJS_LIBTCMUR)

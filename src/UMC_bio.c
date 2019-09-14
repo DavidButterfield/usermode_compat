@@ -355,11 +355,6 @@ bio_endio(struct bio * bio, error_t err)
     else if (!bio_flagged(bio, BIO_UPTODATE))
 	err = -EIO;
 
-    if (!err) {
-	bio->bi_sector += bio->bi_size >> 9;
-	bio->bi_size = 0;	/* resid */
-    }
-
     if (bio->bi_end_io)
 	bio->bi_end_io(bio, err);
 }

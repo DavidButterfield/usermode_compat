@@ -61,8 +61,14 @@ io_done_sts(struct tcmu_device * tcmu_dev,
     error_t err = 0;
 
     /* Translate tcmur_status_t to -errno */
-    if (sts != TCMU_STS_OK)
-	err = -EIO;
+    if (sts != TCMU_STS_OK) {
+    	if (sts == TCMU_STS_NO_RESOURCE)
+	    err = -ENOMEM;
+	else {
+	    pr_warning("EIO: io_done_sts(%d)\n", sts);
+	    err = -EIO;
+	}
+    }
 
     io_done(bio, err);
 
@@ -74,6 +80,7 @@ io_done_sts(struct tcmu_device * tcmu_dev,
 
 static error_t make_request(struct request_queue *, struct bio *);
 
+/* Here after a sync that also has an I/O with it */
 static void
 io_continue(struct tcmu_device * tcmu_dev,
 	    struct tcmur_cmd * cmd, tcmur_status_t sts)
@@ -85,24 +92,20 @@ io_continue(struct tcmu_device * tcmu_dev,
 	io_done_sts(tcmu_dev, cmd, sts);
     else {
 	bio->bi_rw &= ~REQ_BARRIER;
-	make_request(NULL, bio);
+    	assert(!op_is_sync(UMC_bio_op(bio)));
 	assert_eq(cmd->iovec, 0);	/* the fsync had no iovec */
-	kmem_cache_free(op_cache, op);
+	kmem_cache_free(op_cache, op);	/* free the sync op */
+	make_request(NULL, bio);	/* will allocate new op for the I/O */
     }
 }
 
-/* Early reply due to error */
-static void
-io_done_err(struct bio * bio, error_t err)
-{
-    io_done(bio, err);
-}
-
 /* Receive a bio request from our client */
+/* Returns a -errno now xor a completion call later *///XXX right?
 static error_t
 make_request(struct request_queue *rq_unused, struct bio * bio)
 {
     error_t err;
+    size_t iov_nbytes = 0;
     size_t cmdlen = 0;
     
     bool is_sync = op_is_sync(UMC_bio_op(bio));
@@ -114,22 +117,28 @@ make_request(struct request_queue *rq_unused, struct bio * bio)
     struct gendisk * disk = bio->bi_bdev->bd_disk;
 
     unsigned short niov = bio->bi_vcnt;
-    unsigned short iovn = bio->bi_idx;	    //XXX right?
+    unsigned short iovn = bio->bi_idx;	    //XXX start here, right?
 
     int minor = disk->first_minor;
 
     uint64_t seekpos = bio->bi_sector << 9;
     ssize_t dev_size = tcmur_get_size(minor);
-    if (dev_size < 0) {
-	err = (error_t)dev_size;	    /* -errno */
-	goto out_finish;
-    }
 
     #define BITS_OK ((1ul<<BIO_RW_FAILFAST)|(1ul<<BIO_RW_META)|(1ul<<BIO_RW_AHEAD) \
 		    |(1ul<<BIO_RW_SYNCIO)|(1ul<<BIO_RW_UNPLUG)|(1ul<<BIO_RW_BARRIER))
     expect_eq(bio->bi_rw & ~(WRITE|BITS_OK), 0,
 		"Unexpected bi_rw bits 0x%lx/0x%lx",
 		bio->bi_rw & ~(WRITE|BITS_OK), bio->bi_rw);
+
+    if (dev_size < 0)
+	return (error_t)dev_size;	/* -errno */
+
+    if (seekpos >= (size_t)dev_size) {
+	pr_warning("attempt to seek minor %d (%s) to %lu outside bound %lu\n",
+	    minor, tcmur_get_dev_name(minor), seekpos, tcmur_get_size(minor));
+	bio_set_flag(bio, BIO_EOF);
+	return -EIO;
+    }
 
     op = kmem_cache_zalloc(op_cache, 0);
     if (!op)
@@ -140,25 +149,18 @@ make_request(struct request_queue *rq_unused, struct bio * bio)
     cmd = &op->tcmur_task.tcmur_cmd;
     cmd->done = io_done_sts;
 
+    //XXX Figure out intended sync semantics
     if (is_sync) {
 	if (!bio_empty_barrier(bio))
-	    cmd->done = io_continue;
+	    cmd->done = io_continue;	/* come back for the I/O after the sync */
 	err = tcmur_flush(minor, &op->tcmur_task);
-	if (err)
-	    io_done_err(bio, err);
-	return err;
+	goto out;  /* if there's an I/O to do, io_continue() will call us back */
     }
 
-    if (seekpos >= (size_t)dev_size) {
-	bio_set_flag(bio, BIO_EOF);
-	pr_warning("attempt to seek minor %d (%s) to %lu outside bound %lu\n",
-	    minor, tcmur_get_dev_name(minor), seekpos, tcmur_get_size(minor));
-	err = -EINVAL;		//XXX right?
-	goto out_finish;
-    }
+    cmdlen = bio->bi_size;
 
-    if (seekpos + bio->bi_size > (size_t)dev_size)
-	bio->bi_size = (unsigned int)(dev_size - seekpos);	//XXX right?
+    if (seekpos + cmdlen > (size_t)dev_size)
+	cmdlen = (unsigned int)(dev_size - seekpos);  //XXX do this adjustment, right?
 
     if (niov <= ARRAY_SIZE(op->iov_space))
 	cmd->iovec = op->iov_space;
@@ -183,29 +185,29 @@ make_request(struct request_queue *rq_unused, struct bio * bio)
 	    cmd->iovec[iovn].iov_len = seglen;
 	    ++iovn;
 	}
-	cmdlen += seglen;
+	iov_nbytes += seglen;
 	++bio->bi_idx;
     }
 
-    assert_eq(cmdlen, bio->bi_size);
+    cmd->iov_cnt = iovn;		    /* number of iovec elements we filled in */
+
+    assert_ge(iov_nbytes, cmdlen);
     assert_eq(cmdlen % 512, 0);
     assert_eq(seekpos % 512, 0);
 
-    cmd->iov_cnt = iovn;		    /* number of iovec elements we filled in */
-
-    /* Submit the command to the handler */
+    /* Submit the command to the handler through libtcmur */
     if (is_write) {
 	err = tcmur_write(minor, &op->tcmur_task, cmd->iovec, cmd->iov_cnt, cmdlen, seekpos);
     } else {
 	err = tcmur_read(minor, &op->tcmur_task, cmd->iovec, cmd->iov_cnt, cmdlen, seekpos);
     }
 
+out:
     if (!err)
 	return 0;
 
-out_finish:
-    io_done_err(bio, err);
-    return err;		    //XXX Right?
+    kmem_cache_free(op_cache, op);
+    return err;
 }
 
 static int
@@ -305,7 +307,7 @@ bio_tcmur_remove(int minor)
 error_t
 bio_tcmur_init(int major, int max_minor)
 {
-    assert_eq(bio_enabled, 0);		    /* double init */
+    verify_eq(bio_enabled, 0);		    /* double init */
     assert_gt(max_minor, 0);
     assert_eq(the_bio_tcmur_bdevs, NULL);
     assert_eq(n_bio_tcmur_bdevs, 0);
@@ -328,6 +330,7 @@ bio_tcmur_init(int major, int max_minor)
 	return -ENOMEM;
     }
 
+    bio_tcmur_major = major;
     n_bio_tcmur_bdevs = max_minor;
 
     bio_enabled = true;
@@ -338,7 +341,7 @@ error_t
 bio_tcmur_exit(void)
 {
     int i;
-    assert(bio_enabled);		/* not initialized */
+    verify(bio_enabled);		/* not initialized */
     assert(the_bio_tcmur_bdevs);
     assert(n_bio_tcmur_bdevs);
     assert(op_cache);
@@ -352,6 +355,7 @@ bio_tcmur_exit(void)
     vfree(the_bio_tcmur_bdevs);
     the_bio_tcmur_bdevs = NULL;
     n_bio_tcmur_bdevs = 0;
+    bio_tcmur_major = 0;
 
     kmem_cache_destroy(op_cache);
     op_cache = NULL;

@@ -379,6 +379,7 @@ _UMC_work_queue_thr(struct workqueue_struct * workq, const char * wq_name)
 	while (!list_empty_careful(&workq->list)) {
 	    struct work_struct * work = list_first_entry(&workq->list, typeof(*work), entry);
 	    list_del_init(&work->entry);
+	    ++workq->ndequeued;
 	    spin_unlock(&workq->lock);	    /* unlock workq while delivering callback */
 	    {
 		work->fn(work);		    /* callback to work function */

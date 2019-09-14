@@ -710,6 +710,8 @@ struct workqueue_struct {
     struct wait_queue_head	    flushed;
     bool		   volatile is_idle;
     atomic_t			    is_flushing;
+    uint64_t			    nenqueued;
+    uint64_t			    ndequeued;
     char			    name[64];
 };
 
@@ -728,6 +730,7 @@ extern void destroy_workqueue(struct workqueue_struct * workq);
 		     (WORK)->wq = (WORKQ); \
 		     spin_lock(&(WORKQ)->lock); \
 		     {   list_add_tail(&(WORK)->entry, &(WORKQ)->list); \
+		         ++(WORKQ)->nenqueued; \
 			 if (unlikely((WORKQ)->is_idle)) \
 			    _do_wake = true; \
 		     } \

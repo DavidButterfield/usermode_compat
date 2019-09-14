@@ -29,7 +29,7 @@ fuse_bio_endio(struct bio * bio, error_t err)
     complete((struct completion *)bio->bi_private);
 }
 
-static ssize_t
+static error_t
 _fuse_bio_io(struct block_device * bdev, void * buf, size_t iosize, off_t ofs, int rwf)
 {
     struct bio * bio;
@@ -43,13 +43,10 @@ _fuse_bio_io(struct block_device * bdev, void * buf, size_t iosize, off_t ofs, i
     memset(pages, 0, sizeof(pages));
 
     assert_imply(iosize, buf);
-    assert_eq(ofs % 512, 0, "EINVAL unaligned offset on minor %d",
+    assert_eq(ofs % 512, 0, "unaligned offset on minor %d",
 				bdev->bd_disk->first_minor);
-    assert_eq(iosize % 512, 0, "EINVAL unaligned iosize on minor %d",
+    assert_eq(iosize % 512, 0, "unaligned iosize on minor %d",
 				bdev->bd_disk->first_minor);
-//  assert_eq((uintptr_t)buf % 512, 0, "EINVAL unaligned buffer on minor %d", minor);
-//  if ((uintptr_t)buf % 512)
-//	return -EINVAL;
 
     bio = bio_alloc(0, npage);
     bio_set_dev(bio, bdev);
@@ -77,72 +74,85 @@ _fuse_bio_io(struct block_device * bdev, void * buf, size_t iosize, off_t ofs, i
 
     /* Issue the I/O and wait for it to complete */
     {
-	ssize_t ret;
+	error_t err;
 	struct completion c;
 	init_completion(&c);
 	bio->bi_private = (void *)&c;
 
-	ret = submit_bio(rwf, bio);
-	if (!ret) {
+	err = submit_bio(rwf, bio);
+	if (!err) {
 	    wait_for_completion(&c);
-	    ret = bio->bi_error;
+	    err = bio->bi_error;
 	}
-
-	assert_le(bio->bi_size, iosize);
-
-	if (ret == 0)
-	    ret = iosize - bio->bi_size;    /* done = requested - residual */
 
 	bio_put(bio);
 
-	return ret;
+	return err;
     }
 }
 
 static ssize_t
 fuse_bio_io(struct block_device * bdev, char * buf, size_t iosize, off_t ofs, int rwf)
 {
-    ssize_t ret;
+    error_t err;
     /* Handle bogus partial sector I/O coming even when using kernel buffer cache */
     //XXXX could copy only the first and/or last block; we process pages separately above...
     size_t align = 1u << bdev->bd_inode->i_blkbits;
     off_t end = ofs + iosize;
     bool is_write = op_is_write(rwf);
+    size_t dev_size = bdev_size(bdev);
+    assert_eq(dev_size % align, 0);
 
     off_t adj_ofs;
     off_t adj_end;
     ssize_t adj_iosize;
     char * adj_buf;
 
+    if (end < ofs)
+	return -EIO;	/* overflow of ofs + iosize */
+
+    if (ofs >= dev_size)
+	return -EIO;	/* I/O starts beyond end of medium */
+
+    if (end > dev_size) {
+	/* I/O crosses end of medium -- truncate the I/O */
+	iosize -= end - dev_size;
+	end = dev_size;
+    }
+
     if (ofs % align || iosize % align) {
+	/* I/O start and/or size is not aligned -- use larger temp buf */
 	adj_ofs = ofs / align * align;
 	adj_end = (end + align - 1) / align * align;
 	adj_iosize = adj_end - adj_ofs;
 	adj_buf = vmalloc(adj_iosize);
 	if (is_write) {
 	    trace_bio("READ BEFORE WRITE: (minor %d) %ld @%ld", (int)minor, adj_iosize, adj_ofs);
-	    ret = _fuse_bio_io(bdev, adj_buf, adj_iosize, adj_ofs, READ);
+	    err = _fuse_bio_io(bdev, adj_buf, adj_iosize, adj_ofs, READ);
+	    //XXX check err
+	    /* Copy the data to be written into part of the buffer we just read */
 	    memcpy(adj_buf + ofs - adj_ofs, buf, iosize);
 	}
     } else {
+	/* I/O is already aligned */
 	adj_ofs = ofs;
 	adj_end = end;
 	adj_iosize = iosize;
 	adj_buf = buf;
     }
 
-    ret = _fuse_bio_io(bdev, adj_buf, adj_iosize, adj_ofs, rwf);
-    if (ret >= 0 && ret != adj_iosize)
-	ret = -EIO;
+    assert_le(adj_end, dev_size);
+
+    /* Issue the aligned I/O */
+    err = _fuse_bio_io(bdev, adj_buf, adj_iosize, adj_ofs, rwf);
 
     if (adj_buf != buf) {
-	if (!is_write && ret > 0) {
+	if (!err && !is_write)
 	    memcpy(buf, adj_buf + ofs - adj_ofs, iosize);
-	}
 	vfree(adj_buf);
     }
 
-    return ret < 0 ? ret : (ssize_t)iosize;
+    return err ?: (ssize_t)iosize;
 }
 
 static ssize_t
