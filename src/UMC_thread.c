@@ -6,7 +6,7 @@
 #include "UMC_thread.h"
 #include "UMC_lock.h"
 
-#define trace_kthread(fmtargs...)   	nlprintk(fmtargs)
+#define trace_kthread(fmtargs...)   	// nlprintk(fmtargs)
 #define trace_sig(fmtargs...)		nlprintk(fmtargs)
 
 __thread struct task_struct * current;   /* current task (thread) structure */

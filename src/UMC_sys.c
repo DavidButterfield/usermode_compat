@@ -37,6 +37,10 @@ int
 call_usermodehelper(const char * progpath, char * argv[], char * envp[], int waitflag)
 {
     pid_t cpid = fork();
+    if (cpid < 0) {
+	printk("usermodehelper '%s' fork failed!\n", progpath);
+	return -1;
+    }
     if (cpid) {
 	int status;
 	if (waitflag == UMH_NO_WAIT)

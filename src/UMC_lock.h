@@ -131,9 +131,9 @@ rwlock_assert_writer(rwlock_t * rw)
 #ifdef UMC_LOCK_CHECKS
     verify_le(atomic_read(&rw->count), 0,
 		    "Writer not locked exclusive??");
-    verify_eq(current, rw->owner,
+    expect_eq(current, rw->owner,
 		    "%s expected to own lock '%s' owned instead by %s",
-		    current->comm, rw->name, rw->owner->comm);
+		    current->comm, rw->name, rw->owner?rw->owner->comm:"nobody");
 #endif
 }
 
@@ -166,7 +166,7 @@ rwlock_take_try(rwlock_t * rw, unsigned int ntake)
     }
     /* Successfully took (ntake) from lock available count */
 #ifdef UMC_LOCK_CHECKS
-    verify_eq(rw->owner, NULL);	    /* we got it, so nobody else better own it exclusively */
+    expect_eq(rw->owner, NULL);	    /* we got it, so nobody else better own it exclusively */
 #endif
     if (ntake >= _RW_LOCK_WR_COUNT) {
 	/* We're not merely reading -- record as exclusive owner */
@@ -232,17 +232,19 @@ static inline void
 mutex_assert_holding(struct mutex * lock)
 {
 #ifdef UMC_LOCK_CHECKS
-    verify_eq(current, lock->owner,
+    expect_eq(current, lock->owner,
 		"%s (%d) expected to own lock '%s' owned instead by %s (%d) taken at %s",
 		current->comm, current->pid, lock->name,
-		lock->owner->comm, lock->owner->pid, lock->last_locker);
+		lock->owner?lock->owner->comm:"nobody",
+		lock->owner?lock->owner->pid:0,
+		lock->last_locker);
 #endif
 }
 
 #ifdef UMC_LOCK_CHECKS
 
 #define UMC_LOCK_CLAIM(lock, whence) do { \
-    verify_eq((lock)->owner, NULL); \
+    expect_eq((lock)->owner, NULL); \
     (lock)->owner = current; \
     (lock)->last_locker = whence; \
     trace_lock("'%s' (%u) at %s takes lock %s (@%p)", \
@@ -310,7 +312,8 @@ _mutex_lock(struct mutex * lock, sstring_t whence)
     if (!err)
 	return;
 #ifdef UMC_LOCK_CHECKS
-    verify(lock->owner != current,
+    if (current)
+    expect_ne(lock->owner, current,
 	"Thread %d ('%s') attempts to acquire a lock '%s' (@%p) "
 	"it already holds (%p) taken at %s",
 	current->pid, current->comm,
@@ -381,7 +384,8 @@ _spin_lock(spinlock_t * lock, sstring_t whence)
     error_t err;
     while ((err = _spin_lock_try(lock, whence)) != 0) {
 #ifdef UMC_LOCK_CHECKS
-	verify(lock->owner != current,
+	if (current)
+	expect_ne(lock->owner, current,
 	    "Thread %d ('%s') attempts to acquire a lock '%s' (@%p) "
 	    "it already holds (%p) taken at %s",
 	    current->pid, current->comm,
