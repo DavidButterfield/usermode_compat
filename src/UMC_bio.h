@@ -365,7 +365,7 @@ static inline bool bio_rw_flagged(struct bio *bio, enum bio_rw_flags flag)
 #define bio_sectors(bio)	((bio)->bi_size >> 9)
 
 #define bio_has_data(bio)	((bio)->bi_size != 0)
-#define bio_empty_barrier(bio)	(bio_rw_flagged(bio, REQ_BARRIER) && !bio_has_data(bio))
+#define bio_empty_barrier(bio)	(bio_rw_flagged(bio, BIO_RW_BARRIER) && !bio_has_data(bio))
 
 #define bio_flagged(bio, bitno)		(((bio)->bi_flags &   (1<<(bitno))) != 0)
 #define bio_set_flag(bio, bitno)	(((bio)->bi_flags |=  (1<<(bitno))))
