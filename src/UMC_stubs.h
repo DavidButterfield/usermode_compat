@@ -47,10 +47,15 @@ struct ahash_request { };
 #define crypto_ahash_reqtfm(h)				UMC_STUB(crypto_ahash_reqtfm)
 #define crypto_ahash_update(h)				UMC_STUB(crypto_ahash_update)
 #define crypto_alloc_ahash(a, b, c)			NULL		//XXX
-#define crypto_alloc_shash(a, b, c)			NULL		//XXX
 #define crypto_free_ahash(h)				DO_NOTHING()
+
+#define crypto_shash_digestsize(tfm)			UMC_STUB(crypto_shash_digestsize)
+#define crypto_shash_final(d, out)			UMC_STUB(crypto_shash_final)
+#define crypto_shash_init(d)				UMC_STUB(crypto_shash_init)
+#define crypto_shash_descsize(d)			UMC_STUB(crypto_shash_descsize)
+#define crypto_shash_update(d, addr, len)		UMC_STUB(crypto_shash_update)
+#define crypto_alloc_shash(a, b, c)			NULL		//XXX
 #define crypto_free_shash(h)				DO_NOTHING()
-#define crypto_shash_descsize(h)			UMC_STUB(crypto_shash_descsize)
 
 #define generic_unplug_device(q)	DO_NOTHING()
 

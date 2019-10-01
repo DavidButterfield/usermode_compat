@@ -137,6 +137,16 @@ rwlock_assert_writer(rwlock_t * rw)
 #endif
 }
 
+static inline bool
+rwlock_is_readlocked(rwlock_t * rw)
+{
+    if (atomic_read(&rw->count) >= _RW_LOCK_WR_COUNT)
+	return false;	/* is not -locked */
+    if (atomic_read(&rw->count) <= 0)
+	return false;	/* is write-locked */
+    return true;
+}
+
 static inline void
 rwlock_assert_readlocked(rwlock_t * rw)
 {
@@ -506,14 +516,18 @@ struct rcu_head {
     do { trace_rcu("RCU UNLOCK"); read_unlock(&UMC_rcu_lock); } while (0)
 
 #define _rcu_assert_readlocked()	rwlock_assert_readlocked(&UMC_rcu_lock)
+#define _rcu_is_readlocked()		rwlock_is_readlocked(&UMC_rcu_lock)
 
 /* These are only supposed to be used under rcu_read_lock(), right? XXX */
-#define rcu_dereference(ptr)		({ /* _rcu_assert_readlocked(); */ (ptr); })
+
+#define rcu_dereference_raw(ptr)	({ (ptr); })
+#define rcu_dereference(ptr)		({ /*_rcu_assert_readlocked();*/ \
+					    rcu_dereference_raw(ptr); })
+#define rcu_dereference_protected(p, c)	({ assert((c) || _rcu_is_readlocked()); \
+					    rcu_dereference_raw(p); })
 
 #define list_for_each_entry_rcu(p, h, m) /* _rcu_assert_readlocked(); */ \
 					 list_for_each_entry((p), (h), m)
-
-#define rcu_dereference_protected(p, c) ({ assert(c); (p); })
 
 /* Writers */
 #define UMC_rcu_write_lock()		write_lock(&UMC_rcu_lock)

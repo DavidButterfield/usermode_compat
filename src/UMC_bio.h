@@ -57,6 +57,7 @@ struct request_queue {
     void			      *	queuedata;
     unsigned int			in_flight[2];
     unsigned long			queue_flags;
+    unsigned long			flush_flags;
     struct backing_dev_info		backing_dev_info;
     struct queue_limits			limits;
     void			      (*unplug_fn)(void *);	//XXX plugging unimplemented
@@ -313,49 +314,86 @@ struct bio {
 //#define BIO_POOL_MASK		(1UL << BIO_POOL_OFFSET)
 //#define BIO_POOL_IDX(bio)	((bio)->bi_flags >> BIO_POOL_OFFSET)	
 
-/* bio bi_rw flags
- * bit 0 -- data direction: READ=0, WRITE=1
- * bit 5 -- barrier
- *	Insert a serialization point in the IO queue, forcing previously
- *	submitted IO to be completed before this one is issued.
- * bit 6 -- synchronous I/O hint.
+//XXX kind of a mess.
+
+enum rq_flag_bits {
+    /* common flags */
+	__REQ_WRITE = 0,            /* not set, read. set, write */
+//	__REQ_FAILFAST_DEV = 1,     /* no driver retries of device errors */
+//	__REQ_FAILFAST_TRANSPORT = 2, /* no driver retries of transport errors */
+	__REQ_FAILFAST_DRIVER = 3,  /* no driver retries of driver errors */
+
+	__REQ_SYNC = 4,             /* request is sync (sync write or read) */
+	__REQ_META = 5,             /* metadata io request */
+	__REQ_DISCARD = 6,          /* request to discard sectors */
+	__REQ_NOIDLE = 7,           /* don't anticipate more IO after this one */
+
+	/* bio only flags */
+	__REQ_RAHEAD = 8,           /* read ahead, can fail anytime */
+//	__REQ_THROTTLED = 9,        /* This bio has already been throttled */
+
+	/* request only flags */
+//	__REQ_SORTED = 10,           /* elevator knows about this request */
+//	__REQ_SOFTBARRIER = 11,      /* may not be passed by ioscheduler */
+	__REQ_FUA = 12,              /* forced unit access */
+//	__REQ_NOMERGE = 13,          /* don't touch this for merging */
+//	__REQ_STARTED = 14,          /* drive already may have started this one */
+//	__REQ_DONTPREP = 15,         /* don't call prep for this one */
+//	__REQ_QUEUED = 16,           /* uses queueing */
+//	__REQ_ELVPRIV = 17,          /* elevator private data attached */
+//	__REQ_FAILED = 18,           /* set if the request failed */
+//	__REQ_QUIET = 19,            /* don't worry about errors */
+//	__REQ_PREEMPT = 20,          /* set for "ide_preempt" requests */
+//	__REQ_ALLOCED = 21,          /* request came from our alloc pool */
+//	__REQ_COPY_USER = 22,        /* contains copies of user pages */
+	__REQ_FLUSH = 23,            /* request for cache flush */
+//	__REQ_FLUSH_SEQ = 24,        /* request for flush sequence */
+//	__REQ_IO_STAT = 25,          /* account I/O stat */
+//	__REQ_MIXED_MERGE = 26,      /* merge of different types, fail separately */
+//	__REQ_SECURE = 27,           /* secure discard (used with __REQ_DISCARD) */
+//	__REQ_ON_PLUG = 28,          /* on plug list */
+//	__REQ_NR_BITS = 29,          /* stops here */
+};      
+
+#define REQ_META		(1 << __REQ_META)
+#define REQ_SYNC		(1 << __REQ_SYNC)
+#define REQ_DISCARD		(1 << __REQ_DISCARD)
+#define REQ_NOIDLE		(1 << __REQ_NOIDLE)
+#define REQ_RAHEAD		(1 << __REQ_RAHEAD)
+#define REQ_FUA			(1 << __REQ_FUA)
+#define REQ_FLUSH		(1 << __REQ_FLUSH)
+#define WRITE_FLUSH		(WRITE | REQ_SYNC | REQ_NOIDLE | REQ_FLUSH)
+
+/* bio bi_rw flags -- bits reassigned from reference kernel defs to improve
+ * interoperability with rq_flag_bits above.
  */
 enum bio_rw_flags {
-	BIO_RW = 0,
-//	BIO_RW_FAILFAST_DEV = 1,
-//	BIO_RW_FAILFAST_TRANSPORT = 2,
-//	BIO_RW_FAILFAST_DRIVER = 3,
-	BIO_RW_FAILFAST = 3,		// scst_vdisk.c
-	BIO_RW_AHEAD = 4,		// drbd_wrappers.h
-	BIO_RW_BARRIER = 5,		// DRBD rejects this
-	BIO_RW_SYNCIO = 6,		// drbd_wrappers.h
-	BIO_RW_UNPLUG = 7,		// drbd_wrappers.h
-	BIO_RW_META = 8,		// scst_vdisk.c
-//	BIO_RW_DISCARD = 9,
-//	BIO_RW_NOIDLE = 10,
+	BIO_RW = __REQ_WRITE,
+	BIO_RW_FAILFAST = __REQ_FAILFAST_DRIVER,    // scst_vdisk.c
+	BIO_RW_SYNCIO = __REQ_SYNC,		    // drbd_wrappers.h (ignored)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2, 6, 32)   //XXX still in 2.6.26, not 2.6.32
+	BIO_RW_SYNC = __REQ_SYNC,		    // drbd_wrappers.h (ignored)
+#endif
+	BIO_RW_META = __REQ_META,		    // scst_vdisk.c (ignored)
 };
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2, 6, 32)   //XXX still in 2.6.26, not 2.6.32
-#define BIO_RW_SYNC			BIO_RW_SYNCIO
-#endif
+#define READ			0
+#define WRITE			1
+#define REQ_BARRIER		(REQ_FUA | REQ_FLUSH)
 
-#define BIO_RW_RQ_MASK			0xf
-
-#define READ				0
-#define WRITE				1
-#define REQ_BARRIER			(1u<<BIO_RW_BARRIER)
-#define REQ_FUA				0x2000
-//#define REQ_FLUSH			0x1000000
-
-// drbd_wrappers.h
-#define WRITE_SYNC_PLUG			(WRITE | (1 << BIO_RW_SYNCIO))
-#define WRITE_SYNC			(WRITE_SYNC_PLUG | (1 << BIO_RW_UNPLUG))
-#define READ_SYNC			(READ | (1 << BIO_RW_SYNCIO) | (1 << BIO_RW_UNPLUG))
+//#define READ_SYNC		(READ | REQ_SYNC | (1 << BIO_RW_UNPLUG))
+#define READ_SYNC		(READ | REQ_SYNC)
 
 static inline bool bio_rw_flagged(struct bio *bio, enum bio_rw_flags flag)
 {
 	return (bio->bi_rw & (1ul<<flag)) != 0;
 }
+
+//XXX These are to satisfy DRBD post-coccinelle symbols not found in the kernel
+#define BIO_DISCARD	REQ_DISCARD
+#define BIO_FUA		REQ_FUA
+#define BIO_FLUSH	REQ_FLUSH
+#define BIO_WRITE	WRITE
 
 #define bio_iovec_idx(bio, idx)	(&((bio)->bi_io_vec[(idx)]))
 #define bio_iovec(bio)		bio_iovec_idx((bio), (bio)->bi_idx)
@@ -365,7 +403,7 @@ static inline bool bio_rw_flagged(struct bio *bio, enum bio_rw_flags flag)
 #define bio_sectors(bio)	((bio)->bi_size >> 9)
 
 #define bio_has_data(bio)	((bio)->bi_size != 0)
-#define bio_empty_barrier(bio)	(bio_rw_flagged(bio, BIO_RW_BARRIER) && !bio_has_data(bio))
+#define bio_empty_barrier(bio)	(((bio)->bi_rw & REQ_BARRIER) && !bio_has_data(bio))
 
 #define bio_flagged(bio, bitno)		(((bio)->bi_flags &   (1<<(bitno))) != 0)
 #define bio_set_flag(bio, bitno)	(((bio)->bi_flags |=  (1<<(bitno))))
@@ -386,6 +424,24 @@ static inline bool bio_rw_flagged(struct bio *bio, enum bio_rw_flags flag)
 
 #define bio_for_each_segment(bvl, bio, i)				\
 	__bio_for_each_segment(bvl, bio, i, (bio)->bi_idx)
+
+/**
+ * blk_queue_flush - configure queue's cache flush capability
+ * @q:          the request queue for the device
+ * @flush:      0, REQ_FLUSH or REQ_FLUSH | REQ_FUA
+ *
+ * Tell block layer cache flush capability of @q.  If it supports
+ * flushing, REQ_FLUSH should be set.  If it supports bypassing
+ * write cache for individual writes, REQ_FUA should be set.
+ */
+static inline void
+blk_queue_flush(struct request_queue *q, unsigned int flush)
+{
+        WARN_ON_ONCE(flush & ~(REQ_FLUSH | REQ_FUA));
+        if (WARN_ON_ONCE(!(flush & REQ_FLUSH) && (flush & REQ_FUA)))
+                flush &= ~REQ_FUA;
+        q->flush_flags = flush & (REQ_FLUSH | REQ_FUA);
+}
 
 static inline sector_t
 blk_rq_pos(const struct request *rq)
@@ -517,6 +573,9 @@ blk_mq_rq_to_pdu(struct request *rq)
 #define blkdev_issue_flush(bdev, x)		fsync_bdev(bdev)    //XXXXX right?
 
 /******************************************************************************/
+
+#define QUEUE_FLAG_DISCARD		17	/* supports DISCARD */
+#define blk_queue_discard(q)		test_bit(QUEUE_FLAG_DISCARD, &(q)->queue_flags)
 
 #define queue_flag_clear(bit, q)	clear_bit((bit), &(q)->queue_flags)
 #define queue_flag_set(bit, q)		set_bit((bit), &(q)->queue_flags)

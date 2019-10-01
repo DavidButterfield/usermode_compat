@@ -124,8 +124,8 @@ make_request(struct request_queue *rq_unused, struct bio * bio)
     uint64_t seekpos = bio->bi_sector << 9;
     ssize_t dev_size = tcmur_get_size(minor);
 
-    #define BITS_OK ((1ul<<BIO_RW_FAILFAST)|(1ul<<BIO_RW_META)|(1ul<<BIO_RW_AHEAD) \
-		    |(1ul<<BIO_RW_SYNCIO)|(1ul<<BIO_RW_UNPLUG)|(1ul<<BIO_RW_BARRIER))
+    //XXX change to warn once
+    #define BITS_OK ((1ul<<BIO_RW_FAILFAST)|REQ_META|REQ_SYNC|REQ_BARRIER)
     expect_eq(bio->bi_rw & ~(WRITE|BITS_OK), 0,
 		"Unexpected bi_rw bits 0x%lx/0x%lx",
 		bio->bi_rw & ~(WRITE|BITS_OK), bio->bi_rw);

@@ -159,4 +159,56 @@ struct __kernel_sockaddr_storage {
 #define TCP_CONGESTION		13	/* Congestion control algorithm */
 #define TCP_MD5SIG		14	/* TCP MD5 Signature (RFC2385) */
 
+/******************************************************************************/
+// New for coccified DRBD
+
+#define min_not_zero(x, y) ({                   \
+        typeof(x) __x = (x);                    \
+        typeof(y) __y = (y);                    \
+        __x == 0 ? __y : ((__y == 0) ? __x : min(__x, __y)); })
+
+#define for_each_set_bit(bit, addr, size) \
+        for ((bit) = find_first_bit((addr), (size)); \
+             (bit) < (size); \
+             (bit) = find_next_bit((addr), (size), (bit) + 1))
+
+#define list_first_entry_or_null(ptr, type, member) \
+        (!list_empty(ptr) ? list_first_entry(ptr, type, member) : NULL)
+
+#define time_after(a,b)         \
+        (typecheck(unsigned long, a) && \
+         typecheck(unsigned long, b) && \
+         ((long)((b) - (a)) < 0))
+#define time_before(a,b)        time_after(b,a)
+
+#define time_after_eq(a,b)      \
+        (typecheck(unsigned long, a) && \
+         typecheck(unsigned long, b) && \
+         ((long)((a) - (b)) >= 0))
+#define time_before_eq(a,b)     time_after_eq(b,a)
+
+#define time_in_range(a,b,c) \
+        (time_after_eq(a,b) && \
+         time_before_eq(a,c))
+
+/* Caller must be guard these RCU list functions with rcu_read_lock() */
+
+#define list_entry_rcu(ptr, type, member) \
+({ \
+        typeof(*ptr) __rcu *__ptr = (typeof(*ptr) __rcu __force *)ptr; \
+        container_of((typeof(ptr))rcu_dereference_raw(__ptr), type, member); \
+})
+
+#define list_first_or_null_rcu(ptr, type, member) \
+({ \
+        struct list_head *__ptr = (ptr); \
+        struct list_head *__next = ACCESS_ONCE(__ptr->next); \
+        likely(__ptr != __next) ? list_entry_rcu(__next, type, member) : NULL; \
+})
+
+#define list_for_each_entry_continue_rcu(pos, head, member)             \
+        for (pos = list_entry_rcu(pos->member.next, typeof(*pos), member); \
+             &pos->member != (head);    \
+             pos = list_entry_rcu(pos->member.next, typeof(*pos), member))
+
 #endif /* UMC_KERNEL_H */
